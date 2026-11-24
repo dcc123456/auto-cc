@@ -141,20 +141,38 @@ export function pickHomeBlocker(input: {
 }
 
 /**
+ * 判一个已登记平台的「真实主机」。
+ *
+ * 为什么不能拿 `sessions.status()` 的 `startUrl` 判：那份来自 `cordis.yml` 的静态平台清单，
+ * 与 `platform-boss.pack` 无关——切到 fixture 之后它仍是 `https://www.zhipin.com/`，
+ * 于是纯仿站验收实例的首屏依旧出「先登录 BOSS 直聘」，点了还会走人那一路把真站挂进视图。
+ * 登记处（`platform.registry.list`）的 `origins` 才跟着当前 pack 走。
+ * @param platform 登记处的一行
+ * @param isLocal 判某个 origin 是否回环
+ * @returns 只要有一个非回环来源就算真实平台
+ */
+export function isRealPlatform(
+  platform: { origins?: readonly string[]; startUrl: string },
+  isLocal: (url: string) => boolean,
+): boolean {
+  const origins = platform.origins ?? [platform.startUrl];
+  return origins.some((origin) => !isLocal(origin));
+}
+
+/**
  * Home 判「登录这一前置」的口径。
  *
- * 只有**真实平台**在场时才谈登录（与状态条同一口径：本机仿站不是「你有几个账号」）；
- * 一个真实平台都没登记时要说「登录不适用」——否则仅用本机仿站的验收环境里，首屏第一步永远是
- * 「先登录 BOSS 直聘」，点过去是一堵登录墙，新手既走不下去也不该去走。
- * @param platforms 会话读数里的平台清单
- * @param isLocal 判某个 `startUrl` 是否本机地址（`platform-choice` 的那一份）
- * @returns 需要先登录时为 true；没有真实平台时恒 false
+ * 只有**真实平台**在场时才谈登录；一个真实平台都没有（纯本机仿站装配）时登录不适用——
+ * 否则首屏第一步永远是「先登录 BOSS 直聘」，点过去既走不下去、也不该走去。
+ * @param rows 会话读数里的平台行（带登录态）
+ * @param realIds 登记处判定的真实平台 id 集合
+ * @returns 需要先登录时为 true
  */
 export function loginFirstApplies(
-  platforms: readonly { startUrl: string; auth: string }[],
-  isLocal: (startUrl: string) => boolean,
+  rows: readonly { id: string; auth: string }[],
+  realIds: ReadonlySet<string>,
 ): boolean {
-  const real = platforms.filter((row) => !isLocal(row.startUrl));
+  const real = rows.filter((row) => realIds.has(row.id));
   if (real.length === 0) return false;
   return !real.some((row) => row.auth === 'active');
 }
@@ -247,6 +265,8 @@ interface HomeTrend {
 /** 接下来那一块所需的读数。 */
 interface HomeNext {
   platforms: SessionPlatformView[];
+  /** 登记处判定的真实平台 id；纯仿站装配里为空集（登录不适用）。 */
+  realPlatformIds: Set<string>;
   docs: ResumeDocSummaryView[];
   authorization: UnattendedAuthorizationView | null;
   run: UnattendedRunView | null;
@@ -344,15 +364,18 @@ export function HomePanel() {
 
   /** 接下来那块：登录态 / 简历 / 授权单 / 执行器（阻断优先排序用它）。 */
   const loadNext = useCallback(async (): Promise<HomeNext> => {
-    const [sessionsReply, docsReply, authReply, runReply] = await Promise.all([
+    const [sessionsReply, docsReply, authReply, runReply, registryReply] = await Promise.all([
       bridge?.sessions.status(),
       bridge?.resume['doc.list'](),
       bridge?.outbound['authorization.current'](),
       bridge?.journey['unattended.view'](),
+      // 真实平台按**登记处**判（跟着当前 pack 走），不拿会话配置里的静态 startUrl 判。
+      bridge?.platform['registry.list'](),
     ]);
     // 同一条口径（裁定 E）：报出是哪一条读数失败，而不是只报下游服务名。
     const calls = [
       ['sessions.status', sessionsReply],
+      ['platform.registry.list', registryReply],
       ['resume.doc.list', docsReply],
       ['outbound.authorization.current', authReply],
       ['journey.unattended.view', runReply],
@@ -369,6 +392,11 @@ export function HomePanel() {
     }
     return {
       platforms: sessionsReply?.ok ? sessionsReply.value.platforms : [],
+      realPlatformIds: new Set(
+        (registryReply?.ok ? registryReply.value.platforms : [])
+          .filter((platform) => isRealPlatform(platform, isLocalSessionUrl))
+          .map((platform) => platform.id),
+      ),
       docs: docsReply?.ok ? docsReply.value : [],
       authorization: authReply?.ok ? authReply.value : null,
       run: runReply?.ok ? runReply.value : null,
@@ -404,9 +432,10 @@ export function HomePanel() {
   /** 「接下来」的六条（按阻断优先），并按当前状态算出哪几条该出现。 */
   const steps = useMemo(() => {
     const value = next.state === 'ready' ? next.value : undefined;
-    const real = (value?.platforms ?? []).filter((row) => !isLocalSessionUrl(row.startUrl));
-    // 只有真实平台在场时才把「先登录」排到第一步；只有本机仿站的环境里，登录这一前置不适用（见 loginFirstApplies）。
-    const loginNeeded = loginFirstApplies(value?.platforms ?? [], isLocalSessionUrl);
+    const realIds = value?.realPlatformIds ?? new Set<string>();
+    const real = (value?.platforms ?? []).filter((row) => realIds.has(row.id));
+    // 只有真实平台在场时才把「先登录」排到第一步；纯仿站装配里登录这一前置不适用（见 loginFirstApplies）。
+    const loginNeeded = loginFirstApplies(value?.platforms ?? [], realIds);
     const platformName = real[0] ? platformLabel(t, real[0].id) : t('home.next.platformFallback');
     const hasDocs = (value?.docs.length ?? 0) > 0;
     const authActive = value?.authorization?.status === 'active';
@@ -450,9 +479,9 @@ export function HomePanel() {
   const blocker = useMemo((): { id: HomeBlockerId; text: string; to: 'trust' | 'resume' | 'models' } | null => {
     const value = next.state === 'ready' ? next.value : undefined;
     if (!value) return null;
-    const real = value.platforms.filter((row) => !isLocalSessionUrl(row.startUrl));
+    const real = value.platforms.filter((row) => value.realPlatformIds.has(row.id));
     const id = pickHomeBlocker({
-      isLoggedIn: !loginFirstApplies(value.platforms, isLocalSessionUrl),
+      isLoggedIn: !loginFirstApplies(value.platforms, value.realPlatformIds),
       hasDocs: value.docs.length > 0,
       modelMissing: model.state === 'ready' && model.value.missing.length > 0,
     });
