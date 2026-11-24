@@ -1,0 +1,28 @@
+10.12-11 冷启动缺陷：全新空库「首启」读数（2026-11-24，开发侧）
+
+**根因**：`llm.chat` 在 `[Service.init]` 里调 `status()` → 读 `llm_providers`，而建表的 `llm-settings` 在装配里排在后面。
+全新空库上首启时表还不存在 → init 抛错 → `llm` 挂载失败 → `outbound-script` / `outbound-greet` / `journey`
+连带 PENDING → 工具面只剩 17 只；第二次启动（表已建）才 22 只。
+
+**修法（不靠挂载顺序）**
+1. `llm.chat` 的 init **不再读表**：改为只记一行「可用性按调用时现读」，`status()` 每次现解析。
+2. `providerRowOf()` 对「表还没建」这一种错**按回落处理**（返回 `undefined`），其余错误照旧抛：
+   `no such table` 不是查询失败，而是「这一刻这一池还不可读」，调用方走通道自己的 baseUrl（模板回落），
+   建表插件挂上来之后自然读得到。这样即便将来装配顺序再被改坏，也不会把整条能力链拖进 PENDING。
+3. 用例：`packages/llm/src/llm.test.ts` 新增「空库上先挂 `llm.chat`、后挂建表插件」一条——
+   首启不炸、`status()` 不抛；再挂 `llm.settings` 后仍是一句读数。
+
+**活体（全新 userData，首启，未重启）**
+
+| 读点 | 读数 |
+| --- | --- |
+| `agent.tools.list()` | **22 只**（首启即 22，不是 17） |
+| 含外发 | `outbound.greet.perform` ✅、`outbound.deliver.perform` ✅ |
+| 含追踪 | `journey.search` / `journey.tailor` / `journey.interview` ✅ |
+| 插件错误 | `plugins.status().errorCount = 0`、`errors = []`（没有任何 PENDING 引发的挂载错误） |
+| 注册表规模 | `metrics.registrySize = 61` |
+
+工具名单逐条：["outbound.script.generate", "sessions.open", "browser.page.navigate", "browser.page.snapshot", "browser.locate.find", "browser.act.click", "browser.act.type", "outbound.greet.perform", "outbound.deliver.perform", "jd.store.list", "jd.capture.run", "workflow.run", "resume.parse.fromFile", "kb.profile.list", "kb.profile.search", "kb.profile.syncVectors", "kb.gap.report", "resume.generate.run", "resume.generate.accept", "journey.search", "journey.tailor", "journey.interview"]
+
+判据对照：本条要的「首启 22 只 + 含 greet/journey + llm 不是 PENDING」三项全部由首启（非二次启动）取到；
+`llm` 的挂载错误在 `plugins.status().errors` 里为 0 条。

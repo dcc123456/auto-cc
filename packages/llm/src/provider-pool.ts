@@ -171,7 +171,18 @@ export function saveProviderRow(
  * @returns 那一行；不存在时 undefined（调用方据此报错，不在这里判"该不该存在"）
  */
 export function providerRowOf(db: DatabaseSync, id: string): ProviderRow | undefined {
-  return db.prepare('SELECT * FROM llm_providers WHERE id = ?').get(id) as unknown as ProviderRow | undefined;
+  try {
+    return db.prepare('SELECT * FROM llm_providers WHERE id = ?').get(id) as unknown as ProviderRow | undefined;
+  } catch (error) {
+    // 「表还没建」不是这条查询的失败，而是**这一刻这一池还不可读**（2026-11-24 QA 的冷启动缺陷：
+    // 全新空库首启时 `llm` 的 init 比建表的 `llm-settings` 先跑，读表直接炸掉整个服务，连带
+    // outbound-greet / journey 一起 PENDING，工具面只剩 17 只）。按「绑定读不到就回落」的既有口径处理：
+    // 回 undefined，调用方走通道自己的 baseUrl（模板回落），等建表插件挂上来之后自然读得到。
+    if (typeof error === 'object' && error !== null && /no such table/i.test(String((error as Error).message))) {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 /**

@@ -342,12 +342,10 @@ export class LlmChatService extends Service {
   };
 
   [Service.init](): void {
-    const status = this.status();
-    this.ctx.logger.info(
-      status.available
-        ? `模型出口就绪：${String(status.model)} @ ${String(status.endpoint)}`
-        : `模型出口未就绪：缺 ${status.missing.join(' / ')}（调用方将走模板回落）`,
-    );
+    // 这里**不读表**（2026-11-24 冷启动缺陷）：全新空库首启时建表的 `llm-settings` 可能排在后面，
+    // 在 init 期读 `llm_providers` 会让本服务挂载失败，并把 outbound-greet / journey 一起拖进 PENDING。
+    // 就绪读数改为**用时现问**（`status()` 每次现解析），装配顺序因此不再是正确性的前提。
+    this.ctx.logger.info('模型出口已装载：可用性按调用时现读（不依赖建表插件的挂载顺序）');
   }
 }
 

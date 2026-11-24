@@ -5,12 +5,17 @@
  * 「回落」就是假的）、对端非 2xx 与空回复都要变成结构化错误（否则下游会把空文案发出去）。
  * 网络一律用存根，不打真实模型端点（AGENTS.md §7.2）。
  */
-import { asApp, Context } from '@auto-cc/core';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { asApp, Context, NO_CONFIG } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
+import { StoreService } from '@auto-cc/plugin-store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bodyText, json, stubFetch } from './fetch-stub.js';
 import type { LlmConfig } from './index.js';
 import { LlmChatService } from './index.js';
+import { LlmSettingsService } from './settings.js';
 
 const KEY_ENV = 'AUTO_CC_LLM_TEST_KEY';
 const BASE_URL = 'https://model.test.invalid/v1';
@@ -342,5 +347,37 @@ describe('llm.chat 的失败形态（全部结构化，不许静默）', () => {
     } finally {
       fixture.restore();
     }
+  });
+});
+
+/**
+ * 冷启动（2026-11-24 QA 的 P1）：全新空库首启时，建表的 `llm-settings` 可能排在 `llm.chat` 后面。
+ *
+ * 判据不是「第二次启动好」，而是**首启就不能炸**：`llm.chat` 挂载成功、`status()` 不抛、表没建也不算失败。
+ * 旧实现 init 期 `status()` → 读 `llm_providers` → `no such table` → 整个服务挂载失败，
+ * 连带 outbound-greet / journey 一起 PENDING、工具面只剩 17 只。
+ */
+describe('冷启动：建表插件排在后面也不炸', () => {
+  it('空库上先挂 llm.chat、后挂建表插件：前者正常挂载，status 不抛且报不可用', async () => {
+    process.env[KEY_ENV] = 'sk-test-abcdef';
+    const dir = mkdtempSync(join(tmpdir(), 'auto-cc-llm-coldstart-'));
+    const ctx = new Context();
+    await ctx.plugin(ConfigService, { appName: 'auto-cc' });
+    await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
+    // 顺序是**故意反的**：先在空库上挂 llm.chat，再让 llm.settings 去建表。
+    await ctx.plugin(LlmChatService, {
+      providerId: 'not-in-pool-yet',
+      baseUrl: BASE_URL,
+      model: 'test-model',
+      keyEnv: KEY_ENV,
+      timeoutMs: 8000,
+      maxTokens: 400,
+      temperature: 0.7,
+    });
+    const llm = asApp(ctx)['llm.chat'];
+    expect(llm.status()).toMatchObject({ available: true, endpoint: ENDPOINT });
+    await ctx.plugin(LlmSettingsService, NO_CONFIG);
+    // 建表之后绑定仍然读不到那一行（池是空的），但这是一句读数，不是一次崩溃。
+    expect(llm.status().providerId).toBeNull();
   });
 });
