@@ -13,6 +13,7 @@ import type { JourneyJobMatchView, UnattendedAuthorizationView, UnattendedRunVie
 import { Banner, DeskButton, DeskCheck, DeskField } from './ui/controls';
 import { DeskPathGuide } from './ui/disclosure';
 import { reportDeskAuthorization } from './deskStatus';
+import { advanceViewTrail } from './viewTrail';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 授权卡需要的三要素来源与可勾选岗位（都来自本轮已读出的主链读数）。 */
@@ -87,14 +88,33 @@ export function OutboundAuthorizationCard({
   const [tailorNow, setTailorNow] = useState(Date.now());
   /** 母版 doc id：优先取传入的版本串，其次现读库内第一份母版（卡上定制需要它）。 */
   const [fallbackDocId, setFallbackDocId] = useState('');
-  useEffect(() => {
-    if (masterVersion !== '') return;
-    void (async () => {
-      const reply = await bridge?.resume['doc.list']();
-      if (!reply?.ok) return;
-      setFallbackDocId(reply.value.find((doc) => doc.parentDocId === null)?.id ?? '');
-    })();
+  /**
+   * 现读一次母版 doc id。
+   *
+   * 为什么必须能重读（2026-11-24 QA 的读数：「用了虚构样例，主链仍写母版 无」）：
+   * 旧写法只在挂载那一刻读一次 `doc.list`，而人往往是**先打开这一屏、再回简历页种/导入样例**，
+   * 于是这一格的母版 id 永远停在空串 → 点「先定制这一岗」直接早退到「还没有母版简历」，
+   * 三态一次都不出现（QA 那 60 次采样全是禁用，就是这个分支）。
+   * @returns 可用的母版 doc id；库里确实没有母版时为空串
+   */
+  const resolveMasterDoc = useCallback(async (): Promise<string> => {
+    // **先读简历库**（管理员 2026-11-24 裁定①）：母版就是库里 `parentDocId === null` 的那一份。
+    // 旧写法优先取 `masterVersion`（那是意向/定制快照），没生成过意向的人在库里明明有母版，
+    // 这一格却读成空串，直接掉进「还没有母版简历」——顺序依赖的死路就从这里来的。
+    const reply = await bridge?.resume['doc.list']();
+    if (reply?.ok) {
+      const master = reply.value.find((doc) => doc.parentDocId === null)?.id ?? '';
+      setFallbackDocId(master);
+      if (master !== '') return master;
+    }
+    // 库读不到（或确实没有母版）时才退回调用方给的版本串；两者都没有就是空串，由界面给原因与出口。
+    if (masterVersion.startsWith('doc:')) return masterVersion.split(':')[1] ?? '';
+    return masterVersion;
   }, [bridge, masterVersion]);
+
+  useEffect(() => {
+    void resolveMasterDoc();
+  }, [resolveMasterDoc]);
 
   /**
    * 重读授权单与停用位：动作之后一律重建读数，不自己猜主进程当下的状态。
@@ -125,7 +145,16 @@ export function OutboundAuthorizationCard({
     const off = bridge?.on('outbound/authorization-paused', () => {
       void reload();
     });
-    return () => off?.();
+    // 执行器的终态事件只推 `status`/`pendingCount`：读数本身仍要现读，**包括收尾那一刻**
+    // （2026-11-24 萌新：投完一岗却写「完成 0 岗」，因为 800ms 轮询在状态切走的同一拍就停了，
+    // 最后一次读到的还是「推 completed 之前」的快照）。
+    const offRun = bridge?.on('journey/unattended-changed', () => {
+      void reloadRun();
+    });
+    return () => {
+      off?.();
+      offRun?.();
+    };
   }, [bridge, reload, reloadRun]);
 
   // 运行中每 800ms 读一次进度（执行器在主进程里跑，界面不推第二条状态）。
@@ -183,7 +212,7 @@ export function OutboundAuthorizationCard({
             factCheckReceiptId: effectiveReceipt,
           });
           if (!granted.ok) return granted;
-          return bridge.journey['unattended.start']({ docId: masterDocIdValue, platform: effectivePlatform });
+          return bridge.journey['unattended.start']({ docId: await resolveMasterDoc(), platform: effectivePlatform });
         })();
       },
       { describe: () => t('journeyAuth.grantStarted') },
@@ -250,10 +279,6 @@ export function OutboundAuthorizationCard({
    * @returns 无返回值（结果落在 `tailorState` 与 `localTailor` 上）
    */
   const tailorJob = (jobId: string): void => {
-    if (masterDocIdValue === '') {
-      setNotice(t('journeyAuth.reasonNoMaster'), 'amber');
-      return;
-    }
     if (!bridge) {
       setNotice(t('journeyAuth.tailorNoBridge'), 'amber');
       return;
@@ -262,13 +287,20 @@ export function OutboundAuthorizationCard({
     setTailorState({ jobId, phase: 'running', startedAt });
     setTailorNow(startedAt);
     void (async () => {
+      // 母版**现读**再判：人可能刚刚在简历页种了样例/导入了简历，而这一格是挂载那一刻的快照。
+      const docId = await resolveMasterDoc();
+      if (docId === '') {
+        setTailorState(null);
+        setNotice(t('journeyAuth.reasonNoMaster'), 'amber');
+        return;
+      }
       /** 120 秒没回执就按失败收尾；底层调用即使后来回来了也不再改写这一格（人已经看到失败并可以重试）。 */
       let timer: number | undefined;
       const timeout = new Promise<never>((_, reject) => {
         timer = window.setTimeout(() => reject(new Error(t('journeyAuth.tailorTimeout'))), TAILOR_TIMEOUT_MS);
       });
       try {
-        const reply = await Promise.race([bridge.journey.tailor({ docId: masterDocIdValue, jobId }), timeout]);
+        const reply = await Promise.race([bridge.journey.tailor({ docId, jobId }), timeout]);
         if (!reply.ok) {
           setTailorState({
             jobId,
@@ -534,6 +566,33 @@ export function OutboundAuthorizationCard({
           {notice}
         </Banner>
       )}
+
+      {/* 母版为空时不能只有一句「还没有母版简历」：给原因码 + 就地一颗去简历页的键（管理员 2026-11-24 裁定②）。
+          旧读数里人看到那句话之后无处可去——简历库里其实已经有一份，只是这一格读的是意向快照。 */}
+      {masterDocIdValue === '' ? (
+        <div
+          className="mt-2 flex flex-wrap items-center gap-2"
+          data-testid="journey-auth-no-master"
+          data-error-code="JOURNEY_AUTH_NO_MASTER"
+        >
+          <span className="min-w-0 flex-1 text-[11px] text-amber">{t('journeyAuth.noMasterReason')}</span>
+          <DeskButton
+            action="journey-auth-goto-resume"
+            variant="line"
+            compact
+            onClick={() => {
+              advanceViewTrail({
+                sourceView: 'jobs',
+                sourceTitle: t('desk.jobs.title'),
+                targetView: 'resume',
+                targetTitle: t('desk.resume.title'),
+              });
+            }}
+          >
+            {t('journeyAuth.gotoResume')}
+          </DeskButton>
+        </div>
+      ) : null}
 
       {/* 卡上定制的三种落点（2026-11-24 QA 死路的修法）：进行中有秒数、失败给原因码+原话+重试、
           成功把版本与回执写进卡片并解锁「授权并开跑」。**任何一态都不许把整组键钉在禁用上**：

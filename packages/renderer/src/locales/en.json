@@ -2496,7 +2496,9 @@
       "tailorDoneNotice": "Tailored: the card now has a version and receipt, authorization is unlocked",
       "tailorFailedNotice": "Tailoring did not succeed: see the reason below and retry",
       "reasonTailorRunning": "This job is being tailored; wait for it to finish or time out",
-      "grantStarted": "Authorization opened and the runner started; see the status line above"
+      "grantStarted": "Authorization opened and the runner started; see the status line above",
+      "noMasterReason": "No master resume here yet (code JOURNEY_AUTH_NO_MASTER): import one on the Resume page or use the fictional sample, then come back",
+      "gotoResume": "Go to Resume"
     }
   }
 }

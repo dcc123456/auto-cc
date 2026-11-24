@@ -240,3 +240,28 @@ PASS · 隐藏态零账本：账本 2 → 2
 渲染层没有组件测试框架，读数以活体为准）；`dist:mac` EXIT=0；
 dmg **157780017 B / `7d9d6150736ce547…`**、asar **`f43d1b02b27c5a97…`**；
 `smoke:dist --exe dist/mac-arm64/...` → **六步全过**。
+
+十三、母版顺序死路：修了一半，还差一步（2026-11-25 01:4x · 候选包 dmg `a3225213…` / asar `3f6b1a0c…`）
+--------------------------------------------------------------------------------------
+QA 的读数（先开求职主链、后种样例 → 点「先定制这一岗」60 次采样全是禁用、卡片「定制 无 · 回执 无」）
+根因确认：`tailorJob` 的母版 id 来自**挂载那一刻**读到的 `fallbackDocId`，而 `masterVersion` 又是
+意向/定制快照（`JourneyPanel` 传的是 `tailor?.resumeVersion ?? intent?.resumeVersion ?? ''`）。
+没生成过意向的人两条都是空 → 直接掉进 `JOURNEY_AUTH_NO_MASTER` 早退分支，三态一次都不出现。
+
+已修（本包）：
+1. 母版来源改成**先读简历库**（`resume.doc.list` 里 `parentDocId === null` 那一份），库读不到才退回版本串；
+2. `tailorJob` 在动手**前现读**一次母版（不再是挂载快照）；
+3. 母版为空时不再只给一句话：`[data-testid="journey-auth-no-master"][data-error-code="JOURNEY_AUTH_NO_MASTER"]`
+   + 就地一颗「去简历页」（`journey-auth-goto-resume`，走既有 `advanceViewTrail` 跳转）；
+4. 执行器终态事件 `journey/unattended-changed` 现在也会重读 `unattended.view()`
+   （萌新「完成 0 岗」的一个可能来源：800ms 轮询在状态切走那一拍就停，最后一次读到的是推 completed 之前的快照）。
+
+**没修好的一格（如实报）**：反顺序探针（抓 3 条 → 开求职主链面板 → 去简历页点「用虚构样例」→ 回岗位页 → 勾选 → 点定制）
+里三态**确实出现了**（`running` → `failed` + 「重试定制」），但失败码是
+`KB_SOURCE_MISSING`「简历  不存在」——**定制调用拿到的 docId 是空串**，说明母版解析在这条顺序下仍然返回空。
+候选包上这一格**不算过**，下一轮先查两处：
+① `resume.doc.list` 里种子样例那一行的 `parentDocId` 到底是 `null` 还是 `''`（空串会让 `=== null` 的筛选落空）；
+② `JourneyPanel` 传给卡片的 `masterVersion` 在当前实现里是否还该参与兜底（它与库内母版是两份事实）。
+
+另：萌新的第二、三处数字（漏斗「投递成功」格空缺、首页「投递成功 0」却写「最近一笔 01:24:08」）
+本轮**没能复现**（需要跑一轮真正的无人值守投递），因此**未修、未验**，不判绿。

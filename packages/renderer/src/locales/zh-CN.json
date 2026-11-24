@@ -2496,7 +2496,9 @@
       "tailorDoneNotice": "定制完成，卡片已拿到版本与回执，可以开授权了",
       "tailorFailedNotice": "定制没有成功：原因见下方那一行，可点「重试定制」再来一次",
       "reasonTailorRunning": "这一岗正在定制中，等它结束或超时后再动",
-      "grantStarted": "已开单并带起执行器，状态见上方那一行"
+      "grantStarted": "已开单并带起执行器，状态见上方那一行",
+      "noMasterReason": "这一格还没有母版简历（原因码 JOURNEY_AUTH_NO_MASTER）：去简历页导入一份，或用「用虚构样例」备一份，回来就能定制",
+      "gotoResume": "去简历页"
     }
   }
 }
