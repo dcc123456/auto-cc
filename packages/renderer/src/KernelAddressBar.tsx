@@ -99,7 +99,7 @@ export function KernelAddressBar() {
     void run(t('kernel.address.navigate'), async () => {
       const status = await bridge!.shell.getStatus();
       if (status.ok && status.value.kernelViewPartition === '') await bridge!.shell.recoverKernelView();
-      return await bridge!.browser['page.navigate'](url);
+      return await bridge!.browser['page.navigate'](url, 'user');
     });
   };
   const navigate = () => open(draft);
@@ -114,7 +114,7 @@ export function KernelAddressBar() {
       setNotice(t('kernel.address.reasonNoCurrent'), 'seal');
       return;
     }
-    await run(t('kernel.address.reload'), () => bridge!.browser['page.navigate'](url));
+    await run(t('kernel.address.reload'), () => bridge!.browser['page.navigate'](url, 'user'));
   };
 
   // 还没有打开过站点：内核视图停在 data: 占位页或 URL 为空。给「为什么没有 + 怎么起来」，
