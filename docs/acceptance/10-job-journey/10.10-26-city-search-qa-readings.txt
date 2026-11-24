@@ -165,3 +165,42 @@ t=240ms → 「PDF 已生成（1 页）」
 | 隐藏后立即在 eval 里先断言再调用 | 断言 `v0='visible'`，按约定直接 skip，未发起投递（`attempts 0 / ledger 1 / deliveries 0` 未变） |
 
 按管理员口径记「**环境无法制造，未验证**」，不由 QA 判过；请开发给一条可复跑的机器读数路径（例如测试里 `win.hide()` 或 `app.hide()` + 调用前断言 `visibilityState==='hidden'`）。
+
+## 九、候选最终包 `7d9d6150…`（157780017 B、asar `f43d1b02…`）复验：窗口闸通过，授权格仍死路
+
+### ① 窗口闸（按开发给的可复跑命令，我自己跑的）
+
+`pnpm verify:window-gate` → **`GATE_EXIT=0`，8 条判据全 PASS**（原文）：
+
+```
+PASS · 可见态同一份请求发得出去：committed=true · ledgerId=2
+PASS · 投递后追踪到位：["1003=delivered"]
+PASS · 冻结前页面可见：document.visibilityState=visible · kernelViewPageVisible=true
+PASS · 冻结后页面层断言：document.visibilityState=hidden（必须是 hidden）
+PASS · 冻结后 getStatus：windowVisible=true kernelViewVisible=true kernelViewPageVisible=false
+PASS · 页面 hidden 时投递被拒：code=OUTBOUND_WINDOW_NOT_VISIBLE · details={"windowVisible":true,"windowPageVisible":true,"kernelViewVisible":true,"kernelViewPageVisible":false}
+PASS · 隐藏态零 attempt：attempts 1 → 1
+PASS · 隐藏态零账本：账本 2 → 2
+窗口闸结论：通过（8 条判据）
+```
+
+纪律读数：脚本先断言 `visibilityState=hidden` 再调用，断言不成立就不发；我此前用 `osascript` 造 hidden 三次失败时也是断言不成立即 skip、没有硬发。
+**范围限定**（按管理员裁定）：这条只证「页面层 `visibilityState=hidden` → 拒 + `attempts` 零增」分支；`windowVisible`/OS 遮挡那条分支仍是 `[!]` 环境不可复现。
+
+### ② 授权格：**仍停死路**（60 次采样、29.5s）
+
+脚本 `tmp/qa13/auth-3state.mjs`（勾选 → 点「先定制这一岗」→ 每 500ms 采样）：
+
+```
+before {attempts:0, ledger:1, deliveries:0} → after 同（零变更）
+settled: still-disabled · sampleCount: 60 · first t=0 / last t=29500
+first {grantDisabled:true, tailorDisabled:false, card:"定制 无 · 回执 无", elapsed:null, retryVisible:false}
+last  同 first
+everUnlocked: false · everRetry: false · elapsedSeen: []
+```
+
+- 前置已满足「勾选」：先点 `journey-auth-target-1003`，未勾选时 `journey-auth-tailor-1003` 的 `data-disabled-reason=JOURNEY_AUTH_NOT_SELECTED`、title「先勾选这一岗，再点「先定制这一岗」」——**这个前置给得清楚，是好的**。
+- 勾选后点「先定制这一岗」：按钮不再 disabled，但**页面无任何进行中/失败/成功反馈**，30 秒内也没有「已用 N 秒」，卡片始终「定制 无 · 回执 无」，`journey-auth-grant` 始终 `data-disabled-reason=JOURNEY_AUTH_NO_TAILOR`。
+- 面板同时给出「还没有母版简历：先到简历页导入或使用虚构样例」，而库里**已经有** `resume_docs` 1 行（`resume-demo`，就是「使用虚构样例」产生的）、面板却写「母版 无 · 定制 无 · 回执 无」。
+
+**结论**：三态里我只看到「禁用」这一种，没有进行中、没有失败+重试、也没有成功解锁——**仍是死路**，而且**新发现一个更前的前置矛盾**：`使用虚构样例` 落库后主链仍报「还没有母版简历 / 母版 无」，简历页也没有「设为母版」入口，于是这格永远开不了。
