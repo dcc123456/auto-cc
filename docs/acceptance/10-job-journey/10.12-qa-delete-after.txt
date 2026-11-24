@@ -63,3 +63,20 @@ node /tmp/qa12-w.mjs 900|1024|1280|1600|408|299   # 每档：容器宽、轨道�
 node /tmp/qa12-c6.mjs                    # 城市/行业/职位类型三只选择器
 grep -c jd-remove-keeps packages/renderer/src/JobLabPanel.tsx   # 0 → 本版未含 D5
 ```
+
+## 四、「已投递 → 删除」全链（同一构建补跑，2026-11-24 12:08）
+
+上一轮没走完的那条：拿一条**有投递态**的岗位把「删了之后记录还在不在」跑到底。
+为了让这条岗位真的有「已投递」态，我在**副本库**里给它补了一条 `job_status_events(delivered)`（seeded，标注在此，
+不改产品数据语义）；这条补完卡片的三个点全亮（`litDots: 3`），确认界面认它。
+
+| 步骤 | 读数 |
+| --- | --- |
+| 删前 | `jobs 67`、`usage_ledger 10`、`delivery_records 0`、`outbound_attempts 4`、`job_status_events 14`、`conversation_messages 0`；该岗位 tracking = `delivered` |
+| 打开弹窗 | 三点点亮；武装文案原文含「投递记录、沟通记录与追踪进度会保留」 |
+| 确认删除 | 卡片 **67 → 66**、弹窗自动关、`jd-card-1008` 从列表消失、`jobs` 表里 `1008` 行数 **0** |
+| 删后审计 | `usage_ledger 10`、`delivery_records 0`、`outbound_attempts 4`、`conversation_messages 0` —— **逐项不变** |
+| 删后追踪 | `job_status_events` **14（不变）**，该岗位那条 `delivered @ 1795492323450` **仍在** |
+
+**判**：D3/D4 在「已投递」这一情形下同样成立——删岗位不清审计、不清追踪；只有 `jobs` 那行没了。
+**仍未过的只有 D5 的那条独立提示**（`jd-remove-keeps` 不在本构建），等下一个提交。
