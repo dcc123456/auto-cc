@@ -1,0 +1,64 @@
+# 事故证据：QA 的自动化探针访问了真实 BOSS 站（2026-11-24 13:33–13:44 本地）
+
+**结论先说：一共 3 次真站导航（读访问）、1 次真站列表抓取入库 1 行、1 条 `search` 账本行；外发 0 —— 没有任何消息发出去。**
+这违反「自动化永不访问真实招聘平台」这条红线，责任在我（QA 探针），不是产品缺陷、也不是他人指使。
+
+## 一、日志原文（`~/Library/Logs/auto-cc/auto-cc.log`，逐行未改写）
+
+```
+2026-11-24T05:33:35.892Z INFO [browser-page-service] 内核视图已导航：https://www.zhipin.com/job_detail/job-QA（装载 loaded）
+2026-11-24T05:37:42.445Z INFO [browser-page-service] 内核视图已导航：https://www.zhipin.com/job_detail/job-QA2（装载 loaded）
+2026-11-24T05:44:48.646Z INFO [browser-page-service] 内核视图已导航：https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF&city=101020100（装载 loaded）
+2026-11-24T05:44:55.701Z INFO [browser-page-service] 批量抽取完成：容器 15 个 · 回传 12 行 · 帧 5/5
+2026-11-24T05:44:55.703Z INFO [jd-capture-service] JD 抓取结束：boss「前端」滚 1 轮 · 读到 1 张卡 · 入库 1 行 · 跳过 0 条 · 停在 target-count
+```
+
+## 二、库里的物证（副本库，不在用户真实库）
+
+`usage_ledger`（唯一一行，就是那次真站搜索记账）：
+
+```
+{"id":14,"action":"search","target_id":"前端","ts":1795499095703}
+```
+
+`outbound_attempts`（三份副本合计，全部**未成功**；`ledger_id` 全为 null）：
+
+| attempt | 目标 | `status` | `reason` | 判读 |
+| --- | --- | --- | --- | --- |
+| `id 8` | `job-QA` | **`in-flight`** | null | 那次其实是把 `job-QA` 当 targetId 拼到真站 URL（`…/job_detail/job-QA`），页面不存在 → 永远等不到入口 → 永久 `in-flight`（也是 R13-9 缺超时收尾的实例） |
+| `id 9` | `job-QA2` | **`in-flight`** | null | 同上（`…/job_detail/job-QA2`） |
+| `id 10` | `1001` | **`unknown`** | `OUTBOUND_UNKNOWN_ERROR` | 执行层报未知，按 fail-safe 不记账 |
+
+`delivery_records` 空、`usage_ledger` 里没有任何 `greet`/`deliver` 行、`usage_denials` 0 → **外发 0**。
+
+## 三、根因（我自己的操作失误）
+
+1. `platform-boss` 的 `pack` 是**运行期内存配置**（`saveConfig({pack:'fixture'})`，重启即失）；
+2. 我新建副本实例后**没有先读 `readConfig`**，它回到 `cordis.yml` 默认的 **`pack:"real"`**；
+3. 于是在这个实例上跑的 `browser.page.navigate` / `jd.capture.run` 全部按真站知识包执行：
+   - 两次「把 targetId 拼进 job_detail 路径」的导航（`job-QA`、`job-QA2`）——那两个目标是我为负对照随手造的名字，在真站不存在；
+   - 一次 `jd.capture.run`（关键词「前端」、城市上海）——**这一次真的读到并入库了 1 行真站岗位**。
+4. 同时这也解释了那几轮 `in-flight`：**它们不是仿站夹具缺口，是我的实例在打真站**（开发用 HTTP 级证据验证过仿站对任意 id 都渲染 `chat-input`/`chat-send`，那部分他是对的）。
+
+## 四、处置（已执行）
+
+1. **实例已停**：`pkill -f qa13-clean`，`curl :10410` 返回 `000`，无真站会话在跑；
+2. **污染副本已删**：`/tmp/qa13-clean` 整目录删除（不再用于任何取证）；
+3. **这才是我这轮的本份工作**：不再重试、不再起实例去追「批准链恰一次」。
+
+## 五、从此写死的硬前置（已落到脚本）
+
+以后任何取证脚本**起手先断言两件事**，任一不成立立即中止、不导航：
+
+```js
+const pack = (await window.autoCC.plugins.readConfig('platform-boss')).value.values.pack; // 必须 === 'fixture'
+const url  = (await window.autoCC.shell.getStatus()).value.kernelViewUrl;                 // host 必须是 127.0.0.1 / localhost
+```
+
+已写成 `tmp/qa13/guard-fixture.mjs`（断言失败抛错并打印实际值），后续探针一律先 import 它。
+
+## 六、遗留与影响
+
+- 「批准链各恰增 1」这条**仍未拿到**（那次尝试是 `unknown/OUTBOUND_UNKNOWN_ERROR`），且下一轮必须在**先确认 `pack=fixture`** 的前提下重跑；
+- `attempt 8/9` 的永久 `in-flight` 是 R13-9（缺超时收尾）的真实样本，但它的成因是「打了不存在的真站页面」，不是夹具缺口——两件事都要分开记；
+- 真站侧我只做了读访问与 1 行入库，**没有登录、没有验证码处理、没有外发**；但规则是「永不访问」，所以按违规记。
