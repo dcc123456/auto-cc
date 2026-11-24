@@ -30,3 +30,57 @@
 1. **可复现缺陷（P2）**：`pack=real` 下点开城市面板不会自动聚焦搜索框（`activeElement=BODY`）——这与用户「城市无法输入搜索」的体验一致。加 `autoFocus`／打开后 `effect` 聚焦即可，但这属于实现选择，由开发定。
 2. **口径差（P3）**：无匹配时是中性灰提示，没有 amber 警示；若「打错给 amber」是既定判据，这一条不成立，需明确是改样式还是改判据。
 3. 过滤（373→1）、选中回填（「杭州」）、Esc 只关面板、键盘事件不被拦截——这四项都正常，不需要改。
+
+## 四、最终包 `aa0da04`（dmg 157779934 B / `51a6a365…`，asar 20:09）复验读数
+
+### 城市四项（`pack=real`、`--user-data-dir=/private/tmp/qa17-real-ud`、窗口 visible）
+
+| 判据 | 读数 | 结论 |
+| --- | --- | --- |
+| 点开即聚焦 | `activeElement` = `INPUT`、placeholder「搜索…」 | **已消除**（旧包是 `BODY`） |
+| 输入即过滤 | 城市候选 **373 → 1** | 成立 |
+| 选中回填 | `jd-picker-city-杭州` → `-done` → 触发行 `jd-city` 文本「杭州」 | 成立 |
+| 关闭回焦 | `activeElement.dataset.action = jd-city` | 成立 |
+
+（`pack=fixture` 下城市仍是手输 `INPUT`，本轮重复确认可输入。）
+
+### 只建议档不直发（`pack=fixture`、`--user-data-dir=/private/tmp/qa17-fin-ud`）—— 已消除
+
+`suggest` 档、窗口 visible、内核会话已开，对未投过的 `1001` 调 `outbound.deliver.perform`：
+
+```
+ok: true, committed: false
+reason: 档位 suggest：已备好 qa-sample.pdf，未发送（切到半自动档或全自动档后再发）
+```
+
+三表：`attempts 0 / ledger 1（之前的 search 行）/ deliveries 0` → **零增**。
+
+### 窗口不可见闸 —— **在最终包上退化了（新缺陷，P1）**
+
+同一实例把应用隐藏（`System Events … set visible … to false`）后实读 `document.visibilityState = "hidden"`，半自动档对 `1001` 调同一只口：
+
+```
+code:    OUTBOUND_NOT_DELIVERED
+message: 点击后 5269ms 内状态行没有变化：请先打开附件菜单，再登记这一版简历
+details: { "targetId": "1001" }
+```
+
+**没有抛 `OUTBOUND_WINDOW_NOT_VISIBLE`，并且落了一条脏行**：
+
+```
+outbound_attempts: [{ id:1, target_id:"1001", action:"deliver", status:"unknown", ledger_id:null, reason:"OUTBOUND_NOT_DELIVERED" }]
+usage_ledger 1（未增） / delivery_records 0
+```
+
+根因（代码读数，`aa0da04`）：闸的条件是 `!hostStatus.windowVisible || !hostStatus.kernelViewVisible`，而 `windowVisible` 来自 `packages/shell/src/index.ts:188` 的 `win?.isVisible()`。macOS 上把应用 `hidden`（或窗口被完全遮挡）时，**`BrowserWindow.isVisible()` 仍返回 true**，而页面自己的 `document.visibilityState` 已经是 `hidden`；本实例里内核会话是开着的（`kernelViewVisible=true`），于是两个条件都不成立，闸不触发 → 页面点击不落页 → 留下 `unknown` 脏行。
+
+这与「防脏数据」的初衷相反：旧包路径（350cfd1）在同样 hidden 场景下是拒得住的（`details {windowVisible:false,kernelViewVisible:false}`，零 attempt），因为那一次内核会话没开、`kernelViewVisible` 为 false 才拦下。**结论：闸的判据应看页面 `visibilityState`（或加内核视图可见性），不能只看 `BrowserWindow.isVisible()`。**
+
+### 其余项本轮未取到有效读数
+
+- 表单提交键 `deliver-submit`：在岗位卡 → `deliver.form-toggle` 展开后，DOM 里始终只有 `deliver-<jobId>` 与 `deliver.form-toggle`（`data-action=deliver-submit` 一次都没出现，asar 里该锚点命中 1 处）；`deliver-<jobId>` 点下去后也没有新控件出现。**样例 PDF → `deliver-submit` → 账本+1 / 投递记录+1 这条仍未由我复现**。
+- 未选文件点提交的可见原因（N6）、投递后追踪与 Home 同帧（N3/N4）、授权格（N2）、对账区（N5）：都依赖上一条的提交键路径，本轮未验。运行记录页在隐藏状态下也没有读到对账区内容（`对账/待核` 关键词 0 命中、动作清单里没有 `recon*`）。
+
+### 最终 HEAD 四门禁（隔离树独立复跑，`aa0da04`）
+
+`TYPECHECK_EXIT=0`、`LINT_EXIT=0`、`FORMAT_EXIT=0`、`TEST_EXIT=0`；**25 个包套件 / 2859 例全过、零失败**（`grep -cE "FAIL |failed [0-9]"` → 0）。
