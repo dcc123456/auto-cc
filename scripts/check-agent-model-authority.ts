@@ -10,7 +10,9 @@
  *   不出现 `intent` / `observation` / `summary` / `draft` / `steps` 这些模型产出的名字；
  * ④ `policy.ts` 不 import `model.ts`——判定口连模型的类型都不认识，就接不到它的话；
  * ⑤（5.3-a 加，spec 5.3-04）写档位的路径只有「人」那一条：`setAutonomy` 在全仓非测试源码里
- *   只许出现在定义处、IPC 白名单派发处、界面上那只切换这三份文件里，而 `UPDATE chat_session SET autonomy`
+ *   只许出现在定义处、IPC 白名单派发处、界面上那两处**人**的切换（助手输入框那颗档位开关，
+ *   以及 2026-11-24 起投递拦截提示旁的「切到半自动并重发」——萌新在只建议档被拦下后找了 4 分钟
+ *   才找到切换入口，那条出口必须摆在原因旁边；两者都只由人按，命令循环里一处都没有），而 `UPDATE chat_session SET autonomy`
  *   全仓一处，`loop.ts` / `policy.ts` 连那一列的表名都不出现——循环只读档位。
  * ⑥（5.3-b 加，spec 5.3-06 / 07）写免确认白名单的路径同样只有「人」那一条：
  *   `setExempt` / `clearExempt` 只许出现在判定口、IPC 白名单派发处、界面上那两颗按钮这三份文件里，
@@ -154,6 +156,9 @@ const tierWriteAllowlist = [
   'packages/agent/src/session.ts',
   'packages/shared/src/bridge.ts',
   'packages/renderer/src/ChatPanel.tsx',
+  // 2026-11-24 加（spec 5.3-04 的 dated 追记）：投递拦截提示旁的「切到半自动并重发」也是**人**按的一颗键。
+  // 它不构成模型的升档通道——那条提示只在 suggest 档把一次投递拦下之后出现，且必须先有人点。
+  'packages/renderer/src/JobLabPanel.tsx',
 ];
 /**
  * 递归收集各包 `src` 目录下的源码文件（跳过测试与产物目录）。

@@ -573,14 +573,19 @@ export class OutboundDeliverService extends Service {
     // 这里只记一条日志，界面下一次重读会如实显示追踪缺一行。
     if (jobId !== null && jobId !== undefined) {
       try {
-        maybeService<{
+        const tracking = maybeService<{
+          current: (platform: string, jobId: string) => { state: string | null };
           record: (input: { platform: string; jobId: string; to: string; sourceRef: string }) => unknown;
-        }>(this.ctx, 'journey.tracking')?.record({
-          platform,
-          jobId,
-          to: 'delivered',
-          sourceRef: `ledger:${String(ledgerId)}`,
-        });
+        }>(this.ctx, 'journey.tracking');
+        if (tracking) {
+          // 第一次推进只能是 `captured`（10.8-01 的「按事件推进」）：直接投递的岗位往往从没进过追踪表，
+          // 而投递落账本身就是「这条岗确实被我们拿到并处理过」的实锤，所以先补一条 captured 再推进——
+          // 来源引用写同一行账本，两跳都可回溯。反过来伪造 matched/tailored 才是错的（那两个事件没有发生）。
+          if (tracking.current(platform, jobId).state === null) {
+            tracking.record({ platform, jobId, to: 'captured', sourceRef: `ledger:${String(ledgerId)}` });
+          }
+          tracking.record({ platform, jobId, to: 'delivered', sourceRef: `ledger:${String(ledgerId)}` });
+        }
       } catch (error) {
         this.ctx.logger.warn(
           `投递已落账，但追踪没写上（${error instanceof Error ? error.message : String(error)}）：岗位 ${platform}/${jobId}，账本行 ${String(ledgerId)}`,
@@ -661,16 +666,37 @@ export class OutboundDeliverService extends Service {
     // 窗口不在前台就**不要动手**（2026-11-24 萌新 P1）：hidden 时页面点击不落页，旧行为会先留一条
     // `unknown` 尝试，再投就报 `OUTBOUND_RECONCILIATION_REQUIRED`——等于用一条脏记录把人挡在外面。
     // 这里在真正发之前拒绝：零 attempt、零账本，原因写在明面。没有壳层服务（单测/工作流装配）时不拦。
-    const hostStatus = maybeService<{ getStatus: () => { windowVisible: boolean; kernelViewVisible: boolean } }>(
-      this.ctx,
-      'shell',
-    )?.getStatus();
-    if (!staged.unattended && hostStatus && (!hostStatus.windowVisible || !hostStatus.kernelViewVisible)) {
+    //
+    // 判据顺序（2026-11-24 的 P0）：**页面层优先**。只读 `windowVisible`（= `BrowserWindow.isVisible()`）
+    // 在 macOS 上拦不住——应用被隐藏/完全遮挡时它仍回 true，而页面 `document.visibilityState` 已是 hidden，
+    // QA 在最终包上就用这个缺口留下了一条 `unknown` 脏尝试。所以四条任一条不成立就拒绝：
+    // 窗口对象可见、窗口那一页可见、内核视图挂载着、内核视图那一页可见。
+    const hostStatus = maybeService<{
+      getStatus: () => {
+        windowVisible: boolean;
+        windowPageVisible: boolean;
+        kernelViewVisible: boolean;
+        kernelViewPageVisible: boolean;
+      };
+    }>(this.ctx, 'shell')?.getStatus();
+    if (
+      !staged.unattended &&
+      hostStatus &&
+      (!hostStatus.windowVisible ||
+        !hostStatus.windowPageVisible ||
+        !hostStatus.kernelViewVisible ||
+        !hostStatus.kernelViewPageVisible)
+    ) {
       throw new AppError(
         'OUTBOUND_WINDOW_NOT_VISIBLE',
         '窗口不在前台（或站点视图没显示）：先把应用窗口带到前台再投递。这次一步都没发，也没有留下待核对记录',
         'outbound.deliver',
-        { windowVisible: hostStatus.windowVisible, kernelViewVisible: hostStatus.kernelViewVisible },
+        {
+          windowVisible: hostStatus.windowVisible,
+          windowPageVisible: hostStatus.windowPageVisible,
+          kernelViewVisible: hostStatus.kernelViewVisible,
+          kernelViewPageVisible: hostStatus.kernelViewPageVisible,
+        },
       );
     }
     return this.commit(staged, signal);

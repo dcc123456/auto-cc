@@ -776,7 +776,8 @@
       "removeKeeps": "这条岗位已有投递/沟通记录：删除岗位只清库内岗位与抓到的详情，投递记录、沟通记录与追踪进度会保留",
       "limitInlineLabel": "本轮",
       "limitInlineUnit": "条",
-      "limitPlaceholderShort": "20"
+      "limitPlaceholderShort": "20",
+      "progressEta": " · 约剩 {{seconds}} 秒"
     },
     "consent": {
       "heading": "首次启用 {{platform}} 的自动化：先确认风险",
@@ -877,7 +878,11 @@
       "targetNone": "还没选目标：在下方岗位卡上点「投递简历」选一行",
       "targetChosen": "已选投递目标：{{title}}；接下来选文件（或用样例 PDF），再点「提交投递」",
       "submitButton": "提交投递",
-      "needTarget": "先选投递目标：在岗位卡上点一下「投递简历」"
+      "needTarget": "先选投递目标：在岗位卡上点一下「投递简历」",
+      "switchSemi": "切到半自动档并重发",
+      "switchSemiHint": "只建议档不会发送；切档后这一份会真发出去。",
+      "switchSemiDone": "已切到半自动档，正在重发这一份",
+      "useSampleWait": "PDF 正在生成：已用 {{seconds}} 秒（首次通常 1–2 分钟）"
     },
     "action": {
       "noBridge": "桥接不可用：当前不在 Electron 宿主内",
@@ -2476,7 +2481,10 @@
       },
       "actionTailor": "先定制这一岗",
       "reasonNoMaster": "还没有母版简历：先到简历页导入或使用虚构样例",
-      "reasonTailorNeedsSelect": "先勾选这一岗，再点「先定制这一岗」"
+      "reasonTailorNeedsSelect": "先勾选这一岗，再点「先定制这一岗」",
+      "reloadTargets": "重新读取库内岗位",
+      "targetsHint": "先在「岗位」页搜索并入库，再回来勾选；刚抓到的岗位点一次上面的键就会出现。",
+      "targetsReadFailed": "库内岗位没读出来：{{message}}"
     }
   }
 }

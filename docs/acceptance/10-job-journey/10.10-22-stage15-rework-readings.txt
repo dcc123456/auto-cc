@@ -1,0 +1,144 @@
+第 15 片返工读数（开发侧自检，2026-11-24 23:40 · 最终包）
+===========================================================
+
+对应条目：10.10-22（复测路径上的六条返工）+ 10.6-01（授权候选）/ 10.8-01（追踪写路径）/
+10.10-02（可见即重读）/ 10.10-04（只建议档出口）/ 10.10-18（未选文件提示，未变）
+环境：macOS arm64 · 本机仿站 127.0.0.1:10233 · 成品包 `dist/mac-arm64/auto-cc.app`
+（asar `83d1169d696e98c4074e…`，与 dmg 里同一份产物）· CDP 10420/10421/10422（开发段）
+
+一、P0 窗口可见性闸：判据从窗口对象改成页面层（回归已消除）
+------------------------------------------------------------
+根因（QA 在 `aa0da04` 上撞到）：闸只读 `BrowserWindow.isVisible()`，而 macOS 上应用被隐藏/完全遮挡时
+它仍回 true，页面 `document.visibilityState` 已是 hidden——后台投递于是真的跑页面，失败并留下
+`unknown / OUTBOUND_NOT_DELIVERED` 脏尝试，正好是这道闸要防的记录。
+
+改动：
+- `packages/shell/src/view-liveness.ts` 新增 `pageVisibleOf(contents)`：读
+  `webContents.mainFrame.visibilityState === 'visible'`（Electron 44 的 `WebFrameMain` 上就是这个字符串，
+  与页面 `document.visibilityState` 同源）；已销毁/读不到/抛异常一律 false（闸宁可拒绝）。
+- `packages/shell/src/index.ts` 的 `getStatus()` 新增两格：`windowPageVisible`（应用窗口那一页）、
+  `kernelViewPageVisible`（用户实际看到的那一页，含接管子视图）。
+- `packages/shared/src/bridge.ts` 的 `ShellStatus` 补这两格（注释写明与 `windowVisible` 为什么会分岔）。
+- `packages/outbound/src/deliver.ts` 的闸改成四条齐备才放行：
+  `windowVisible && windowPageVisible && kernelViewVisible && kernelViewPageVisible`，
+  任一不成立抛同一个 `OUTBOUND_WINDOW_NOT_VISIBLE`，`details` 带四格原值。
+
+活体读数（成品包，`tmp/g2/hidden2.ts`，把内核视图那一页冻住让 `visibilityState` 变 hidden，
+窗口对象与视图挂载状态都不变——正是 QA 撞到的形状，只是可重复）：
+- 冻结前：内核页 `document.visibilityState = visible`
+- 冻结后：内核页 `document.visibilityState = hidden`
+  `shell.getStatus()` → `windowVisible=true windowPageVisible=true kernelViewVisible=true kernelViewPageVisible=false`
+- 冻结态调 `outbound.deliver.perform` →
+  `OUTBOUND_WINDOW_NOT_VISIBLE`，原文「窗口不在前台（或站点视图没显示）：先把应用窗口带到前台再投递。
+  这次一步都没发，也没有留下待核对记录」，details
+  `{"windowVisible":true,"windowPageVisible":true,"kernelViewVisible":true,"kernelViewPageVisible":false}`
+- `usage.ledger.recentAttempts`：**0 → 0**（零新尝试）
+
+可见态回归（同一成品包）：`kernelViewPageVisible=true` 时投递目标 1004 成功，
+回执 #16，`ledgerId=2`，账本 `deliver:1004` 一行。
+
+回归用例（单测）：
+- `packages/shell/src/view-liveness.test.ts`：`pageVisibleOf` 三档（visible / hidden / 已销毁・无 mainFrame・抛异常）
+- `packages/outbound/src/deliver.test.ts`「投递的窗口可见性闸」三条：
+  页面 hidden 而窗口对象仍 true → 拒绝且 attempts 零增；窗口那一页 hidden → 同样拒；四条全可见 → 照常发。
+
+注（环境事实，供 QA 复跑参考）：成品包里 `osascript ... set visible of process "auto-cc" to false`
+在本机返回 0 但**没有真的隐藏应用**（隐藏后 `document.visibilityState` 仍是 visible），
+所以「隐藏态」这一格本轮改用「冻结内核页」这条可重复的造法取证；判据（页面层 hidden 就拒）不变。
+
+二、授权格死路（10.6-01）：候选是快照，不是没做
+-----------------------------------------------
+根因：`JourneyPanel` 与 `JobLabPanel` 同屏挂载（都属「岗位」工作台），候选岗位只在**挂载那一刻**
+读一次 `jd.store.list`；而抓岗发生在同一屏里 → 授权格永远是抓岗之前的空列表，于是只有
+`journey-auth-grant/revoke/limit/stop`，`JOURNEY_AUTH_NO_TAILOR` 恒现、卡上「定制 无」。
+
+改动：
+- `packages/renderer/src/JourneyPanel.tsx`：候选读库改成可重复调用的一只口 `readLibrary`，
+  三处触发（挂载、这一屏重新可见 `useReloadWhenVisible('jobs')`、求职主链段展开 `onOpenChange`）；
+  读失败把原话交给卡片（`jobsError`），不再静默留空列表。
+- `packages/renderer/src/OutboundAuthorizationCard.tsx`：候选格上方新增「重新读取库内岗位」
+  （`data-action="journey-auth-reload"`）与一句入口提示；读失败时给出 `journey-auth-targets-error`。
+
+活体读数（成品包，抓 4 条岗后展开求职主链段，DOM 现读）：
+`[data-action^="journey-auth-"]` =
+`stop-toggle, revoke, limit, reload, target-1004, tailor-1004, target-1003, tailor-1003,
+target-1002, tailor-1002, target-1001, tailor-1001, grant`
+（**每个岗位都有勾选框与卡上定制键**；读错原话：无）
+
+三、投递后追踪不跟（10.8-01）：状态机缺「直接投递」这一条合法入口
+---------------------------------------------------------------
+根因：投递落账后写 `journey.tracking` 时推 `delivered`，但那一岗从没进过追踪表；状态机要求
+「第一次推进只能是 captured」，`captured → delivered` 又不在允许后继里，于是抛
+`JOB_STATUS_TRANSITION_INVALID` 后被 catch 静默吞掉 → 卡面「未投递」、追踪页「0 个岗位在追」、
+Home「岗位进度 0」，与账本 1 笔自相矛盾。
+
+改动：
+- `packages/journey/src/tracking.ts`：`captured / matched / greeted` 三个投递前态都允许直接 `delivered`
+  （plan §12.4.1「允许跳过，但跳跃必须有回执证据」这句的落地；**不伪造 matched/tailored**，
+  空 `sourceRef` 照旧拒绝）。
+- `packages/outbound/src/deliver.ts`：落账后若这一岗还没有任何追踪记录，先补一条 `captured`，
+  再推 `delivered`；两跳的 `sourceRef` 都是同一行账本 `ledger:<id>`。
+
+活体读数（成品包）：
+- `journey.tracking.list` → `["boss/1004=delivered"]`
+- `usage.ledger.summary` 最近两行 → `["deliver:1004", "search:前端"]`
+
+用例：`packages/journey/src/tracking.test.ts`「直接投递合法：captured / matched 都能跳到 delivered」；
+`packages/outbound/src/deliver.test.ts`「投递顺手写追踪」两条（首次补 captured + 已在追踪里只推 delivered，
+两跳同源账本）。
+
+四、投递后界面不自动刷新（10.10-02 / N7）
+----------------------------------------
+根因：七个视图只改 `display`、不卸载，用量/追踪/看板/授权候选都只在挂载那一刻读一次；
+旧行为要人手动点「重新读取用量/看板」。
+
+改动：抽共用钩子 `packages/renderer/src/ui/view-visibility.ts` 的 `useReloadWhenVisible(view, reload)`
+（原 Home / 简历各有一份同逻辑，第三处起按 AGENTS §2.2 收口），接到
+`UsagePanel` / `JobTrackingPanel` / `MetricsPanel` / `JourneyPanel` / `HomePanel` / `ResumeDesk`；
+不新增定时器、不新增订阅。看板那条在 `scripts/check-dashboard-readonly.ts` 里按「只画界面的纯钩子」
+登记进判据 5 体检（钩子本体不许出现桥接口与网络出口）。
+
+活体读数（成品包，投递后切到「运行记录」**不点任何刷新键**）：
+- 用量最近记录：`#2 deliver → 1004 · 23:27:47` / `#1 search → 前端 · 23:27:44`（两行已在）
+- 追踪段头读数：`1 个岗位在追`
+- 看板空态文案「一条记录都没有」：**不再出现**（有数据）
+
+五、只建议档的出口（10.10-04）与两处等待预期（10.10-21 计时口径）
+----------------------------------------------------------------
+- 拦截提示旁新增「切到半自动档并重发」（`data-action="deliver-switch-semi"`）：点一下
+  `chat.session.setAutonomy('semi')` 然后把同一份目标重发一次（旧文案只说「切到半自动或全自动」，
+  入口却藏在助手输入框那颗开关里，萌新找了约 4 分钟）。这是**人**按的键，已按 dated 追记登记进
+  `scripts/check-agent-model-authority.ts` 的档位写入口清单（清单内仍是人那一侧，循环里一处没有）。
+- 样例 PDF 生成期间显示「已用 N 秒（首次通常 1–2 分钟）」（`data-testid="deliver-sample-wait"`，
+  每秒刷新，结束即清）。
+- 抓取进度补「约剩 N 秒」（`data-testid="jd-progress-eta"`）：只按已收到的 `jd/progress` 推送外推
+  （`packages/renderer/src/progress-eta.ts`），算不出就整截不显示，不写 0 秒。
+
+六、门禁与产物
+------------
+命令（一律 `> log 2>&1; echo "EXIT=$?"`，不接 tail）：
+- `pnpm typecheck` → TYPECHECK_EXIT=0
+- `pnpm lint` → LINT_EXIT=0（含 `check-renderer-conventions` / `check-agent-model-authority` /
+  `check-dashboard-readonly` / `check-lexicon` 四条与本次改动相关的机检）
+- `pnpm format:check` → FORMAT_CHECK_EXIT=0
+- `pnpm test` → TEST_EXIT=0，**2871 例全过**（上一包 2859，本轮新增 12 例：窗口闸 3 + 追踪写路径 2 +
+  直接投递迁移 1 + 页面可见性 3 + ETA 3）
+- `pnpm dist:mac` → DIST_EXIT=0
+  dmg 157772085 B / sha256 `4122aebe124b1726635e…`
+  zip 155124496 B / sha256 `6f80616406693d8bab80…`
+  app.asar sha256 `83d1169d696e98c4074e…`（mac 与 mac-arm64 两份产物同一 asar）
+  可执行 sha256 `e06891704834df56f244…`（与本片上一包相同）
+- `pnpm smoke:dist --exe dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc` → SMOKE_EXIT=0，
+  **六步全过**（含 fixture guard 回环、内置计划在册、占位工作流跑通、岗位弹窗可开、干净退出 code=0）
+  附注：默认口径（`dist/mac` 那份 x64 产物）在本机 Rosetta 下 60 秒内没等到 `app.asar` 页面，
+  故这一轮改用本机原生 arm64 产物跑同一条脚本；两份产物 asar 逐字节相同（`83d1169d…`），
+  所以验的是同一份主进程与渲染层载荷。x64 那一份在本机能否起得来，留给有 Intel 机的窗口复验。
+
+七、本轮**没有**取到的读数（如实登记，不判绿）
+--------------------------------------------
+- 「只建议档 → 点切档 → 重发成功」这条**端到端**没在成品包上走一遍（只验了键存在与它调的那只口；
+  `deliver-switch-semi` 的 DOM 出现条件是「最近一次回执 committed:false」，本轮探针走的是全自动档，
+  没有制造那一格）。要补：suggest 档下投一次 → 看到拦截与那颗键 → 点它 → 期望账本 +1。
+- 抓取「约剩 N 秒」与样例 PDF「已用 N 秒」两处**只验了实现与单测**：本轮探针抓 4 条、生成 1 页都太快，
+  没在快照里抓到那两截文案；要补：抓 10+ 条时读 `data-eta-seconds`、生成期间读 `data-elapsed-seconds`。
+- 萌新同路径计时（≤10 分钟）与卡点数：本轮未重测，等 QA 在 `4122aebe…` 上验完再交萌新。

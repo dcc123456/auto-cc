@@ -49,7 +49,13 @@ import {
 } from './deliver.js';
 import { DeliveryRecordService } from './delivery-record-store.js';
 import { deliverTimingSchema } from './deliver-timing.js';
-import { FakeAgentToolsService, FakeJdReplyStatusService, FakeSessionsService } from './test-doubles.js';
+import {
+  FakeAgentToolsService,
+  FakeJdReplyStatusService,
+  FakeJobTrackingService,
+  FakeSessionsService,
+  FakeShellService,
+} from './test-doubles.js';
 import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
 /** 判定基准：一个真实的当下毫秒数，所有 `nowMs` 都在它附近，避免与本地日界打架。 */
@@ -150,6 +156,15 @@ type BootOptions = {
   timing?: Partial<DeliverConfig['timing']>;
   /** 岗位回复状态；给值才会挂上 `jd.store` 替身，不给就是「平台层没挂载」那一支 */
   replied?: boolean;
+  /** 挂上 `journey.tracking` 替身：演「投递要顺手写追踪」那一条（不挂就是「追踪服务没安装」）。 */
+  tracking?: boolean;
+  /** 壳层可见性替身；给值才会挂上 `shell`，不给就是「没有壳层服务」那一支（闸不拦，同工作流装配） */
+  host?: {
+    windowVisible?: boolean;
+    windowPageVisible?: boolean;
+    kernelViewVisible?: boolean;
+    kernelViewPageVisible?: boolean;
+  };
 };
 
 /**
@@ -176,6 +191,20 @@ async function boot(options: BootOptions = {}) {
   await ctx.plugin(OutboundThrottleService, throttleConfig);
   await ctx.plugin(FakePlatformRegistryService, {});
   await ctx.plugin(FakeSessionsService, {});
+  // 追踪替身按需要挂：投递成功要顺手推进 `journey.tracking`，这条写路径也必须有回归用例。
+  let tracking: FakeJobTrackingService | null = null;
+  if (options.tracking) {
+    await ctx.plugin(FakeJobTrackingService, NO_CONFIG);
+    tracking = ctx.get('journey.tracking');
+  }
+  // 壳层替身按需要挂：不挂就是「没有壳层服务」那一支（工作流装配里不许因为这个闸整条 PENDING）。
+  let shell: FakeShellService | null = null;
+  if (options.host) {
+    await ctx.plugin(FakeShellService, NO_CONFIG);
+    const hostStatus: FakeShellService = ctx.get('shell');
+    Object.assign(hostStatus, options.host);
+    shell = hostStatus;
+  }
   // 回复状态替身按需要挂：不挂正是 5.7-03 的「问不到」那一支——真身缺席时规则必须保守起见不动手。
   let jdStore: FakeJdReplyStatusService | null = null;
   if (options.replied !== undefined) {
@@ -207,6 +236,8 @@ async function boot(options: BootOptions = {}) {
     deliver: asApp(ctx)['outbound.deliver'],
     registry,
     sessions,
+    shell,
+    tracking,
     jdStore,
     ledger: asApp(ctx)['usage.ledger'],
     records: asApp(ctx)['outbound.deliveries'],
@@ -514,6 +545,91 @@ describe('投递的档位与人工确认（spec 2.6-01 / 2.6-06）', () => {
     expect((error as AppError).path).toBe(DELIVER_NODE_KIND);
     expect(hand.calls).toHaveLength(0);
     expect(ledger.count()).toBe(0);
+  });
+});
+
+/**
+ * 窗口可见性闸（2026-11-24 QA 在最终包上撞出的 P0）。
+ *
+ * 判据是**页面层**：`BrowserWindow.isVisible()` 在 macOS 隐藏/完全遮挡时仍回 true，只看它就会在看不见的
+ * 页面上动手、留下一条 `unknown` 脏尝试——正好是这道闸要防的东西。所以这里专门演「窗口对象说可见、
+ * 页面说 hidden」这一格，并用三张表零增当判据。
+ */
+describe('投递的窗口可见性闸（2026-11-24 的 P0）', () => {
+  it('页面 hidden 时拒绝：窗口对象仍说可见也照样不发、不留 attempt', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger, shell } = await boot({
+      channel: hand.channel,
+      host: { windowVisible: true, windowPageVisible: true, kernelViewVisible: true, kernelViewPageVisible: false },
+    });
+    // 前置自检：这一格读数就是 macOS 上「应用被隐藏」的形状（isVisible() 仍 true、页面已 hidden）。
+    expect(shell?.getStatus()).toMatchObject({ windowVisible: true, kernelViewPageVisible: false });
+    const error = await deliver.perform(request({ filePath: writeResume(dir) })).catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe('OUTBOUND_WINDOW_NOT_VISIBLE');
+    expect((error as AppError).details).toMatchObject({ windowVisible: true, kernelViewPageVisible: false });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+    expect(ledger.recentAttempts()).toHaveLength(0);
+  });
+
+  it('应用窗口那一页 hidden 时同样拒绝（页面层四条任一条不成立就不动手）', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger } = await boot({
+      channel: hand.channel,
+      host: { windowVisible: true, windowPageVisible: false, kernelViewVisible: true, kernelViewPageVisible: true },
+    });
+    const error = await deliver.perform(request({ filePath: writeResume(dir) })).catch((reason: unknown) => reason);
+    expect((error as AppError).code).toBe('OUTBOUND_WINDOW_NOT_VISIBLE');
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+    expect(ledger.recentAttempts()).toHaveLength(0);
+  });
+
+  it('四格都可见时照常发出：账本与 attempt 各一行', async () => {
+    const hand = fakeChannel();
+    // 用全自动档：本用例验的是闸放行，不是「等人表态」那一段（那一段有它自己的四条用例）。
+    const { dir, deliver, ledger } = await boot({
+      channel: hand.channel,
+      autonomy: 'auto',
+      host: { windowVisible: true, windowPageVisible: true, kernelViewVisible: true, kernelViewPageVisible: true },
+    });
+    const receipt = await deliver.perform(request({ filePath: writeResume(dir) }));
+    expect(receipt.committed).toBe(true);
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
+    expect(ledger.recentAttempts()).toMatchObject([{ status: 'succeeded' }]);
+  });
+});
+
+/**
+ * 投递之后的追踪写路径（2026-11-24 萌新 P1）。
+ *
+ * 症状：投递落账成功，岗位卡仍写「未投递」、追踪页「0 个岗位在追」、Home「岗位进度 0」——
+ * 三处读的都是 `journey.tracking`，而那条写在旧实现里被状态机拒掉后静默吞了。判据两条：
+ * 第一次推进必须是 `captured`（按事件推进，不伪造 matched/tailored）+ `delivered` 与账本行同源。
+ */
+describe('投递顺手写追踪（2026-11-24 萌新 P1 的返工）', () => {
+  it('第一次投递：先补 captured 再推 delivered，两跳都指向同一行账本', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger, tracking } = await boot({ channel: hand.channel, autonomy: 'auto', tracking: true });
+    const receipt = await deliver.perform(request({ filePath: writeResume(dir) }));
+    expect(receipt.committed).toBe(true);
+    expect(tracking?.events.map((event) => event.to)).toEqual(['captured', 'delivered']);
+    expect(tracking?.events.map((event) => event.sourceRef)).toEqual([
+      `ledger:${String(receipt.ledgerId)}`,
+      `ledger:${String(receipt.ledgerId)}`,
+    ]);
+    expect(ledger.count()).toBe(1);
+  });
+
+  it('已经在追踪里的岗位：只推 delivered，不重复补 captured', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, tracking } = await boot({ channel: hand.channel, autonomy: 'auto', tracking: true });
+    // 先自己登记成 captured（等价于「这个岗是抓来的」），再投递。
+    tracking?.record({ platform: 'boss', jobId: 'job-1001', to: 'captured', sourceRef: 'capture:1' });
+    await deliver.perform(request({ filePath: writeResume(dir) }));
+    expect(tracking?.events.map((event) => event.to)).toEqual(['captured', 'delivered']);
   });
 });
 

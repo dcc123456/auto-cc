@@ -20,7 +20,7 @@ import {
   type ShellStatus,
 } from '@auto-cc/shared';
 import { z } from 'zod';
-import { isViewLive, liveWebContentsOf } from './view-liveness.js';
+import { isViewLive, liveWebContentsOf, pageVisibleOf } from './view-liveness.js';
 import { recoveryVerdict, withRecovery } from './recovery-budget.js';
 import { clampWindowSize, DEFAULT_WINDOW_SIZE, MIN_WINDOW_SIZE, parseWindowSize } from './window-size.js';
 import {
@@ -186,6 +186,10 @@ export class ShellService extends Service {
       nodeVersion: process.versions.node ?? 'unknown',
       platform: process.platform,
       windowVisible: win?.isVisible() ?? false,
+      // 页面层可见性（2026-11-24 的 P0）：`isVisible()` 在 macOS 隐藏/完全遮挡时仍回 true，
+      // 而页面 `visibilityState` 已经是 `hidden`。投递闸必须看这一对，不能只看窗口对象。
+      windowPageVisible: pageVisibleOf(win?.webContents),
+      kernelViewPageVisible: pageVisibleOf(this.activeKernelContents()),
       kernelViewVisible: this.kernelViewVisible,
       kernelViewBounds: bounds,
       kernelViewZoomFactor: this.zoomFactor,

@@ -192,3 +192,100 @@ export class FakeJdReplyStatusService extends Service implements JdReplyStatusSo
     return false;
   };
 }
+
+/**
+ * 假的 `shell`：只回答投递闸要的那四格可见性（2026-11-24 的 P0）。
+ *
+ * 存在理由：真身 `shell` 注入 Electron 的 `BrowserWindow` / `WebContentsView`，在 Node 侧的用例里挂不起来；
+ * 而那一轮 P0 恰好证明**单测看不见**这条闸——判据从 `isVisible()` 挪到页面层之后，必须能演
+ * 「窗口对象说可见、页面说 hidden」这个 macOS 上的分岔，否则回归照样漏。
+ * 四格都能拨，默认全 true（= 前台可见，正常发）。
+ */
+export class FakeShellService extends Service {
+  static provide = 'shell';
+  static Config = z.strictObject({});
+
+  /** 窗口对象自报可见（`BrowserWindow.isVisible()`）；macOS 隐藏时它仍可能是 true。 */
+  windowVisible = true;
+  /** 窗口那一页自己的 `visibilityState`。 */
+  windowPageVisible = true;
+  /** 内核视图挂载着（用户看得见站点槽位）。 */
+  kernelViewVisible = true;
+  /** 内核视图那一页自己的 `visibilityState`——投递真正动手的那一页。 */
+  kernelViewPageVisible = true;
+
+  constructor(ctx: Context) {
+    super(ctx, 'shell');
+  }
+
+  /**
+   * 契约形状与真身同源：`getStatus()` 里那四格可见性（其余字段本包不读，故不建模）。
+   * @returns 四格可见性的当前值
+   */
+  getStatus = (): {
+    windowVisible: boolean;
+    windowPageVisible: boolean;
+    kernelViewVisible: boolean;
+    kernelViewPageVisible: boolean;
+  } => ({
+    windowVisible: this.windowVisible,
+    windowPageVisible: this.windowPageVisible,
+    kernelViewVisible: this.kernelViewVisible,
+    kernelViewPageVisible: this.kernelViewPageVisible,
+  });
+}
+
+/**
+ * 假的 `journey.tracking`：只记「推进序列」，用来断言**投递会写追踪**这件事真的发生了。
+ *
+ * 存在理由（2026-11-24 萌新 P1）：投递落账成功但追踪一行都没写，界面三处（岗位卡/追踪页/Home）
+ * 就与账本自相矛盾，而旧行为把异常静静吞进日志——单测里必须能看见这条写路径。
+ * 状态机本身（允许哪些后继、跳跃要不要回执）由 `journey` 包的用例负责，这里只守一条：
+ * 第一次推进必须是 `captured`，否则按真身的口径抛同样的错。
+ */
+export class FakeJobTrackingService extends Service {
+  static provide = 'journey.tracking';
+  static Config = z.strictObject({});
+
+  /** 收到的推进（按发生顺序），`sourceRef` 一并留着——投递那两跳应当指向同一行账本。 */
+  readonly events: { platform: string; jobId: string; to: string; sourceRef: string }[] = [];
+
+  /** 每个岗位的最新态；缺键就是「还没任何状态记录」。 */
+  private readonly latest = new Map<string, string>();
+
+  constructor(ctx: Context) {
+    super(ctx, 'journey.tracking');
+  }
+
+  /**
+   * 契约形状与真身同源里本包用得到的那一格：当前态。
+   * @param platform 平台标识
+   * @param jobId 岗位标识
+   * @returns `state` 为 null 表示还没有任何记录（真身 `toView(null)` 的同一口径）
+   */
+  current = (platform: string, jobId: string): { state: string | null } => ({
+    state: this.latest.get(`${platform.trim()}/${jobId.trim()}`) ?? null,
+  });
+
+  /**
+   * 记一次推进。
+   * @param input 平台、岗位、目标态与来源引用
+   * @returns 推进后的当前态
+   * @throws 第一次推进不是 `captured` 时与真身同码（`JOB_STATUS_TRANSITION_INVALID`）
+   */
+  record = (input: { platform: string; jobId: string; to: string; sourceRef: string }): { state: string | null } => {
+    const key = `${input.platform.trim()}/${input.jobId.trim()}`;
+    const state = this.latest.get(key) ?? null;
+    if (state === null && input.to !== 'captured') {
+      throw new AppError(
+        'JOB_STATUS_TRANSITION_INVALID',
+        `岗位 ${input.jobId} 还没有任何状态记录：第一次推进只能是 captured`,
+        'journey.tracking',
+        { jobId: input.jobId, to: input.to },
+      );
+    }
+    this.events.push(input);
+    this.latest.set(key, input.to);
+    return { state: input.to };
+  };
+}

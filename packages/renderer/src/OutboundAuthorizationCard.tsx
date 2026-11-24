@@ -25,8 +25,15 @@ export interface OutboundAuthorizationCardProps {
   tailoredVersion: string;
   /** 那次定制的事实校验回执 id。 */
   factCheckReceiptId: string;
-  /** 本次搜岗返回的岗位（显式勾选，不接受"全部岗位"）。 */
+  /** 本次搜岗返回的岗位（显式勾选，不接受"全部岗位"）；搜岗为空时退到库内岗位。 */
   jobs: readonly JourneyJobMatchView[];
+  /**
+   * 重读候选岗位（2026-11-24 萌新死路：候选是挂载那一刻的快照，抓完岗回来永远是空列表）。
+   * 省略时不画那颗键——单测与没有回调的装配里 DOM 一字不变。
+   */
+  onReloadJobs?: () => void;
+  /** 上一次重读候选失败的原话；有值就摆在候选格上，不静默留一个空列表。 */
+  jobsError?: string;
 }
 
 /**
@@ -40,6 +47,8 @@ export function OutboundAuthorizationCard({
   tailoredVersion,
   factCheckReceiptId,
   jobs,
+  onReloadJobs,
+  jobsError,
 }: OutboundAuthorizationCardProps) {
   const { t } = useTranslation();
   const bridge = window.autoCC;
@@ -450,6 +459,30 @@ export function OutboundAuthorizationCard({
       </div>
 
       <div className="mt-2 flex flex-col gap-1" data-testid="journey-auth-targets">
+        {/* 候选是快照，抓完岗回来必须能就地重读（2026-11-24 萌新死路的出口）。
+            没有回调时不画这颗键——探针与没有这一格的面板 DOM 一字不变。 */}
+        {onReloadJobs ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <DeskButton
+              action="journey-auth-reload"
+              variant="line"
+              compact
+              busy={!!busy}
+              disabled={!!busy}
+              disabledReason={busy ? 'ACTION_BUSY' : undefined}
+              disabledReasonLabel={busy ? t('journeyAuth.reasonBusy') : undefined}
+              onClick={onReloadJobs}
+            >
+              {t('journeyAuth.reloadTargets')}
+            </DeskButton>
+            <span className="min-w-0 flex-1 text-[11px] text-slate-500">{t('journeyAuth.targetsHint')}</span>
+          </div>
+        ) : null}
+        {jobsError === undefined ? null : (
+          <p className="text-[11px] text-amber" data-testid="journey-auth-targets-error">
+            {t('journeyAuth.targetsReadFailed', { message: jobsError })}
+          </p>
+        )}
         {jobs.length === 0 ? (
           <p className="text-[11px] text-slate-500">{t('journeyAuth.noTargets')}</p>
         ) : (

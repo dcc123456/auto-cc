@@ -25,6 +25,7 @@ import type {
 import { Banner, DeskButton, DeskSegmented } from './ui/controls';
 import { DeskPathGuide, DeskSection } from './ui/disclosure';
 import { advanceViewTrail } from './viewTrail';
+import { useReloadWhenVisible } from './ui/view-visibility';
 import { isLocalSessionUrl } from './platform-choice';
 import { platformLabel } from './platform-label';
 
@@ -436,23 +437,13 @@ export function HomePanel() {
    * 看到的还是挂载那一刻的账本与追踪。这里用可见性观察，在**这一屏真正露出来时**重读四块读数，
    * 不新增轮询、不新增事件（同 `ResumeDesk` 的做法）。
    */
-  useEffect(() => {
-    const host = document.querySelector<HTMLElement>('[data-view-scroll="chat"]');
-    if (!host || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        // 只在这一屏可见时刷新；不可见时不做无谓重读。
-        reloadNumbers();
-        reloadTrend();
-        reloadNext();
-        reloadModel();
-      },
-      { threshold: 0 },
-    );
-    observer.observe(host);
-    return () => observer.disconnect();
+  const reloadHome = useCallback(() => {
+    reloadNumbers();
+    reloadTrend();
+    reloadNext();
+    reloadModel();
   }, [reloadNumbers, reloadTrend, reloadNext, reloadModel]);
+  useReloadWhenVisible('chat', reloadHome);
 
   /** 「接下来」的六条（按阻断优先），并按当前状态算出哪几条该出现。 */
   const steps = useMemo(() => {

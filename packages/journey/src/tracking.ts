@@ -42,10 +42,14 @@ export const JOB_TRACKING_MIGRATION_VERSION = 45;
  * （站点上可以不经打招呼直接投递），但两边都必须带 `sourceRef`。
  */
 const ALLOWED_TRANSITIONS: Record<Exclude<JobStage, 'closed'>, readonly JobStage[]> = {
-  captured: ['matched', 'closed'],
-  matched: ['tailored', 'closed'],
+  // `delivered` 在四个投递前的态上都放（2026-11-24 萌新 P1 的返工）：岗位卡与授权执行器都能
+  // **不经打招呼/定制**直接投递，这条真实路径过去在表里没有合法入口，于是投递成功却写不进追踪
+  // （被 `JOB_STATUS_TRANSITION_INVALID` 拦下、静默吞掉，界面就成了「账本 1 笔、进度 0」）。
+  // 允许跳过不等于无证据：每一次迁移仍必须带 `sourceRef`（投递时是账本行），空引用照样拒绝。
+  captured: ['matched', 'delivered', 'closed'],
+  matched: ['tailored', 'delivered', 'closed'],
   tailored: ['greeted', 'delivered', 'closed'],
-  greeted: ['replied', 'closed'],
+  greeted: ['replied', 'delivered', 'closed'],
   replied: ['delivered', 'interviewed', 'closed'],
   delivered: ['replied', 'interviewed', 'closed'],
   interviewed: ['closed'],

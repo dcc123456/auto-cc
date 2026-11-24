@@ -11,6 +11,7 @@ import {
 } from '@auto-cc/shared';
 import { Banner, DeskButton, DeskField, DeskSelect, HAIRLINE_ROW_CLASS } from './ui/controls';
 import { DeskSection } from './ui/disclosure';
+import { useReloadWhenVisible } from './ui/view-visibility';
 
 /** 区间档位：两个预设 + 自定义（spec 5.8-04）。localStorage 里存的就是这个判别式。 */
 type RangePreset = 'last7' | 'last30' | 'custom';
@@ -199,6 +200,14 @@ export function MetricsPanel() {
   useEffect(() => {
     void read();
   }, [read]);
+  /**
+   * 切回「运行记录」就重读一次看板（2026-11-24 萌新 N7 的返工）：本面板仍然**没有定时器、没有订阅**，
+   * 只有「这一屏露出来」这一条信号；手动那颗「重新读取」照旧在，不是二选一。
+   */
+  const reloadOnVisible = useCallback(() => {
+    void read();
+  }, [read]);
+  useReloadWhenVisible('trust', reloadOnVisible);
 
   /**
    * 换筛选档位并立刻持久化（spec 5.8-04 的「筛选条件持久化」就落在这一次写入上）。

@@ -601,6 +601,18 @@ export type ShellStatus = {
   nodeVersion: string;
   platform: NodeJS.Platform;
   windowVisible: boolean;
+  /**
+   * 应用窗口那一页的 `document.visibilityState === 'visible'`。
+   *
+   * 与 `windowVisible` 分开是因为它们在 macOS 上会分岔：应用被隐藏或被完全遮挡时
+   * `BrowserWindow.isVisible()` 仍回 true，页面却已经 hidden（2026-11-24 的 P0 就是这个分岔）。
+   */
+  windowPageVisible: boolean;
+  /**
+   * 内核视图（用户实际看到的那一页，含接管子视图）的 `document.visibilityState === 'visible'`。
+   * 视图销毁或读不到时按 false 交出去——闸宁可直接拒绝，也不要在看不见的页面上动手。
+   */
+  kernelViewPageVisible: boolean;
   /** 内核视图当下在不在界面上：默认 false（裁定⑱），只有装着真实站点时才是 true。 */
   kernelViewVisible: boolean;
   /** 内核视图当下的几何（DIP，客户区坐标）：由渲染层实测容器报来；首帧未上报时保持 0×0 不铺位。 */

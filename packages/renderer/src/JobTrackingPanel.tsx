@@ -8,6 +8,7 @@
  * 数据全部来自主进程：状态/约面走 `journey.tracking.*`，趋势走 `funnel.trend`；渲染层不自己按天分桶（决策十七）。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useReloadWhenVisible } from './ui/view-visibility';
 import { useTranslation } from 'react-i18next';
 import {
   startOfDay,
@@ -58,6 +59,10 @@ export function JobTrackingPanel() {
   useEffect(() => {
     void read();
   }, [read]);
+  // 切回「运行记录」就重读：投递/打招呼之后追踪表会多行，而这一屏不卸载（2026-11-24 萌新 P1）。
+  useReloadWhenVisible('trust', () => {
+    void read();
+  });
 
   /** 结束一个岗位：原因从四种里挑，来源写成界面动作（人按的）。 */
   const closeJob = (item: JobTrackingView, reason: JobCloseReason) => {

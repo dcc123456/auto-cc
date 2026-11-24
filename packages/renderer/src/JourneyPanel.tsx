@@ -13,6 +13,7 @@ import type {
 import { Banner, DeskButton, DeskField, DeskSelect, HAIRLINE_ROW_CLASS } from './ui/controls';
 import { OutboundAuthorizationCard } from './OutboundAuthorizationCard';
 import { DeskPathGuide, DeskSection } from './ui/disclosure';
+import { useReloadWhenVisible } from './ui/view-visibility';
 import { isLocalSessionUrl } from './platform-choice';
 import { platformLabel } from './platform-label';
 import { advanceViewTrail } from './viewTrail';
@@ -54,6 +55,8 @@ export function JourneyPanel() {
    * 这里直接读 `jd.store.list`，让抓来的岗位也能勾选、能定制、能开跑。
    */
   const [libraryJobs, setLibraryJobs] = useState<JourneyJobMatchView[]>([]);
+  /** 上一次读库内岗位失败的原话；`undefined` = 读成功（或还没读过）。 */
+  const [libraryError, setLibraryError] = useState<string>();
   const [job, setJob] = useState<JourneyJobMatchView>();
   const [tailor, setTailor] = useState<JourneyTailorView>();
   const [interview, setInterview] = useState<JourneyInterviewView>();
@@ -162,25 +165,44 @@ export function JourneyPanel() {
    * 为选中岗位生成定制简历与招呼草稿；事实违规时服务整份失败。
    * @returns 无返回值
    */
-  /** 读库内岗位，拼成授权候选的形状（匹配计数是「没算过」，用 0 如实表示，不编数）。 */
-  useEffect(() => {
-    void (async () => {
-      const reply = await bridge?.jd['store.list'](50, {});
-      if (!reply?.ok) return;
-      setLibraryJobs(
-        reply.value.rows.map((row) => ({
-          jobId: row.jobId,
-          title: row.title,
-          company: row.company,
-          jdVersion: row.description === '' ? '' : `jd:${row.jobId}`,
-          matchedCount: 0,
-          partialCount: 0,
-          missingCount: 0,
-          requirements: [],
-        })),
-      );
-    })();
+  /**
+   * 读库内岗位，拼成授权候选的形状（匹配计数是「没算过」，用 0 如实表示，不编数）。
+   *
+   * 为什么必须能被重复调用（2026-11-24 萌新死路）：视图只改 display、不卸载，而抓岗发生在同一张
+   * 「岗位」工作台里（`JobLabPanel` 与它同屏），所以挂载那一刻读到的永远是**抓岗之前**的空库，
+   * 授权格于是恒为空、`JOURNEY_AUTH_NO_TAILOR` 恒现。这里把它做成可重读的一只口：
+   * 进来时读一次、这一屏重新可见时读一次、卡上「重新读取库内岗位」再读一次。
+   * 失败不静默：原话交给卡片摆在候选格上（空列表与「读失败」是两件事）。
+   */
+  const readLibrary = useCallback(async () => {
+    if (!bridge) return;
+    const reply = await bridge.jd['store.list'](50, {});
+    if (!reply.ok) {
+      setLibraryError(reply.error.message);
+      return;
+    }
+    setLibraryError(undefined);
+    setLibraryJobs(
+      reply.value.rows.map((row) => ({
+        jobId: row.jobId,
+        title: row.title,
+        company: row.company,
+        jdVersion: row.description === '' ? '' : `jd:${row.jobId}`,
+        matchedCount: 0,
+        partialCount: 0,
+        missingCount: 0,
+        requirements: [],
+      })),
+    );
   }, [bridge]);
+
+  useEffect(() => {
+    void readLibrary();
+  }, [readLibrary]);
+  // 切回「岗位」工作台就重读一次：抓岗是在这一屏里发生的，回来后候选必须跟上（无轮询、无事件）。
+  useReloadWhenVisible('jobs', () => {
+    void readLibrary();
+  });
 
   const loadTailor = () => {
     if (!job) return;
@@ -219,6 +241,7 @@ export function JourneyPanel() {
         if (open) {
           void read();
           void readLogin();
+          void readLibrary();
         }
       }}
     >
@@ -621,6 +644,10 @@ export function JourneyPanel() {
           tailoredVersion={tailor?.tailoredResumeVersion ?? ''}
           factCheckReceiptId={tailor?.factCheckReceiptId ?? ''}
           jobs={search?.jobs.length ? search.jobs : libraryJobs}
+          onReloadJobs={() => {
+            void readLibrary();
+          }}
+          jobsError={libraryError}
         />
       </div>
     </DeskSection>

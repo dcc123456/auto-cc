@@ -55,6 +55,7 @@ import { DeskActionRow, DeskExplainer, DeskPathGuide, DeskSection } from './ui/d
 import { Modal } from './ui/overlays';
 import { matchHits, type MatchCriteria } from './jobMatch';
 import { DeskProgressLog, type DeskProgressEntry } from './ui/progress-log';
+import { captureEtaSeconds } from './progress-eta';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { advanceViewTrail } from './viewTrail';
@@ -286,6 +287,13 @@ export function JobLabPanel() {
   const [greetTargetKey, setGreetTargetKey] = useState('');
   /** 最近一次投递回执：`committed:false` 就是 `suggest` 档的待发送态（spec 2.6-06）。 */
   const [lastDeliver, setLastDeliver] = useState<DeliverReceiptView>();
+  /**
+   * 样例 PDF 开始生成的时刻（2026-11-24 萌新 P1：这一步要 1–2 分钟，界面只有「在跑」没有「多久了」）。
+   * 导出没有进度事件可订阅，所以这里只显示**已经等了多久**加一句常规耗时，不编一个假的百分比。
+   */
+  const [exportStartedAt, setExportStartedAt] = useState<number>();
+  /** 让「已用 N 秒」每秒走一格；只在生成期间挂定时器，结束即清。 */
+  const [exportNow, setExportNow] = useState(Date.now());
   /** 此刻在等的投递单（spec 2.6-01）：只由 `outbound.deliver.pending()` 的读数填，界面不自造。 */
   const [pendingApprovals, setPendingApprovals] = useState<DeliverApprovalView[]>([]);
   /**
@@ -813,15 +821,51 @@ export function JobLabPanel() {
    * 这是 10.10-11 允许的「用刚生成的 PDF」那条路：无本地文件的人不必再被系统文件面板挡住。
    * 样例不存在时由导出服务结构化失败，界面保留原文，不伪造一个路径。
    */
-  const useSamplePdf = () =>
+  const useSamplePdf = () => {
+    setExportStartedAt(Date.now());
+    setExportNow(Date.now());
     void run(t('deliver.useSampleAction'), () => bridge?.resume['export.toPdf'](DEMO_RESUME_DOC_ID), {
       apply: (receipt) => {
+        setExportStartedAt(undefined);
         setBridgeError(undefined);
         setResumePathDraft(receipt.path);
       },
       describe: (receipt) => t('deliver.useSampleDone', { pages: receipt.pages }),
-      onError: setBridgeError,
+      onError: (error) => {
+        setExportStartedAt(undefined);
+        setBridgeError(error);
+      },
     });
+  };
+
+  /** 生成期间每秒刷新一次「已用」，结束（`exportStartedAt` 清空）即停表。 */
+  useEffect(() => {
+    if (exportStartedAt === undefined) return;
+    const timer = window.setInterval(() => setExportNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [exportStartedAt]);
+  /** 已等待的整秒数；没在生成时为 0。 */
+  const exportElapsedSeconds =
+    exportStartedAt === undefined ? 0 : Math.max(0, Math.floor((exportNow - exportStartedAt) / 1000));
+
+  /**
+   * 只建议档被拦下之后就地把档位切到半自动并重发（2026-11-24 萌新 P1）。
+   *
+   * 旧行为只在回执里写「切到半自动档或全自动档后再发」，人得自己找那颗藏在助手输入框的档位开关
+   * （萌新找了 4 分钟）。这里把出口摆在原因旁边：切档是**人的动作**，点了才改，改完立刻重发一次。
+   * @returns 无返回值
+   */
+  const switchToSemiAndResend = (): void => {
+    void (async () => {
+      const reply = await bridge?.chat['session.setAutonomy']('semi');
+      if (!reply?.ok) {
+        setBridgeError(reply?.error);
+        return;
+      }
+      setNotice(t('deliver.switchSemiDone'), 'celadon');
+      submitDeliver();
+    })();
+  };
 
   /**
    * 把确认卡片上那句表态送回主进程（spec 2.6-01）。
@@ -866,6 +910,14 @@ export function JobLabPanel() {
    * 进度段默认收起之后，这一条还要在段头那一行读数里说话——收起不能把"跑到哪了"一起收走。
    */
   const latestProgress = progress?.[0];
+  /**
+   * 「还要多久」（2026-11-24 萌新 P1）：抓 11 条要 2 分 20 秒，而界面只有进度、没有时间预期。
+   * 只按已收到的推送外推，算不出就不显示——给不出估计时写 0 秒比不写更糟。
+   */
+  const captureEta =
+    latestProgress === undefined || latestProgress.phase === 'done'
+      ? null
+      : captureEtaSeconds(progress ?? [], latestProgress.target);
   /** 打招呼流水已翻成上屏条目；最新一条是当前所在的那一步。 */
   const greetProgressEntries: DeskProgressEntry[] = greetProgress.map((event, index) => ({
     key: `${event.phase}-${String(event.step)}-${String(event.at)}`,
@@ -1699,6 +1751,16 @@ export function JobLabPanel() {
               ? t('deliver.pickFileNone')
               : t('deliver.pickFileChosen', { name: resumePathDraft.split('/').pop() ?? resumePathDraft })}
           </span>
+          {/* 生成期间给出「等了多久」与常规耗时（2026-11-24 萌新 P1：这一步 1–2 分钟，没提示就只能干等）。 */}
+          {exportStartedAt === undefined ? null : (
+            <span
+              className="text-[11px] text-amber"
+              data-testid="deliver-sample-wait"
+              data-elapsed-seconds={String(exportElapsedSeconds)}
+            >
+              {t('deliver.useSampleWait', { seconds: exportElapsedSeconds })}
+            </span>
+          )}
         </DeskActionRow>
 
         {/* 唯一的写路径（2026-11-24 裁定③）：先选目标、再有文件，最后由这颗键提交。
@@ -1825,6 +1887,26 @@ export function JobLabPanel() {
               <p className="mt-1 break-all">
                 {t('deliver.receiptWait', { waitedMs: lastDeliver.waitedMs, reason: lastDeliver.reason })}
               </p>
+              {/* 只建议档的出口就在这里（2026-11-24 萌新 P1）：旧文案只说「切到半自动或全自动」，
+                  入口却藏在助手输入框那一颗开关里，萌新找了 4 分钟。切档是人的动作，点了才改，
+                  改完立刻把同一份目标重发一次，人不用再走一遍。 */}
+              {lastDeliver.committed ? null : (
+                <DeskActionRow className="mt-1">
+                  <DeskButton
+                    action="deliver-switch-semi"
+                    variant="seal"
+                    compact
+                    busy={!!busy}
+                    disabled={!!busy}
+                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                    disabledReasonLabel={busy !== undefined ? t('jd.reasonBusy') : undefined}
+                    onClick={switchToSemiAndResend}
+                  >
+                    {t('deliver.switchSemi')}
+                  </DeskButton>
+                  <span className="min-w-0 flex-1 text-[11px] text-slate-300">{t('deliver.switchSemiHint')}</span>
+                </DeskActionRow>
+              )}
               {/* 对账编号只有出问题要查库时才用得上，所以挂在披露层里；
                   同一批值也已经在上面那组 `data-*` 上，这里给人读、那里给机器读，不是两份事实。 */}
               <DeskExplainer id="deliver.receiptIds" className="mt-1" label={t('deliver.receiptIdsToggle')}>
@@ -1875,6 +1957,12 @@ export function JobLabPanel() {
                 stored: latestProgress.stored,
                 target: latestProgress.target,
               })}
+              {/* 预计剩余：算不出来就不长这一截（见 `captureEtaSeconds` 的 null 口径）。 */}
+              {captureEta === null ? null : (
+                <span data-testid="jd-progress-eta" data-eta-seconds={String(captureEta)}>
+                  {t('jd.progressEta', { seconds: captureEta })}
+                </span>
+              )}
             </span>
           ) : (
             <span data-testid="jd-progress-summary">{t('jd.progressIdle')}</span>

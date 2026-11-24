@@ -16,6 +16,9 @@
  *    2026-10-07 用户裁定放开 `./ui/controls` 这一条（06-ui-ink-desk 第三十片的活体读数证明看板那几处
  *    手写的 class 与原件同源、换件不动画面），但**放开的只是这一条相对路径**，不是"引 UI 层没关系"：
  *    原件自己有没有偷偷开口子，由判据 5 直接检它本体。
+ *    2026-11-24 放开 `./ui/view-visibility`：萌新 N7 的返工是「投递之后统计页不自动重读，仍显示一条记录都没有」，
+ *    而七个视图只改 `display`、不卸载，看板只在挂载那一刻读一次。那条钩子只做一件事：在这一屏露出来时
+ *    调一次 `read()`（`document.querySelector` + `IntersectionObserver`），**不碰任何桥接口**，所以它进判据 5 的体检清单。
  *    2026-10-12（6.4-21）同一条口径再放开 `./ui/disclosure`：看板那一段收进 `DeskSection` 段头，
  *    而段头画法是 `disclosure.tsx` 持有的（`SECTION_HEAD_CLASS`）——放开的还是"只画界面"的那一类通道，
  *    所以这一条与 `./ui/controls` 一起进判据 5 的本体检数。
@@ -58,12 +61,16 @@ const ALLOWED_MODULES: readonly string[] = [
   '@auto-cc/shared',
   './ui/controls',
   './ui/disclosure',
+  // 2026-11-24 加：「这一屏露出来就重读一次」的纯界面钩子（判据 5 一并钉它本体，见 `UI_PRIMITIVES`）。
+  './ui/view-visibility',
 ];
 
 /** 判据 5：被放开的这两条进口本体必须只是"画界面"的。 */
 const UI_PRIMITIVES: readonly string[] = [
   'packages/renderer/src/ui/controls.tsx',
   'packages/renderer/src/ui/disclosure.tsx',
+  // 2026-11-24 加：它被看板引用了，就必须同样证明「只是界面」——不许出现桥接口与网络出口。
+  'packages/renderer/src/ui/view-visibility.ts',
 ];
 
 /** 判据 5 里原件本体允许的进口：react / 图标 / 类型包，加上原件之间共用画法的相对路径。 */
@@ -73,6 +80,8 @@ const ALLOWED_PRIMITIVE_IMPORTS: readonly string[] = [
   'lucide-react',
   '@auto-cc/shared',
   './controls',
+  // 钩子要认得视图标识的类型（纯类型 import，编译后不留运行期依赖）。
+  '../viewTrail',
 ];
 
 /** 桥接口上唯一允许的服务命名空间与方法（`window.autoCC.funnel.query`）。 */

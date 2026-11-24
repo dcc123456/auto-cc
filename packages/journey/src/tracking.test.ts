@@ -94,6 +94,22 @@ describe('八态状态机（10.8-01）', () => {
     expect(tracking.current(PLATFORM, 'job-1').state).toBe('delivered');
   });
 
+  it('直接投递合法：captured / matched 都能跳到 delivered（岗位卡与执行器不经过定制的真实路径）', async () => {
+    const { tracking } = await boot();
+    tracking.record({ platform: PLATFORM, jobId: 'job-1', to: 'captured', sourceRef: 'capture:1', at: NOW });
+    // 无回执照样拒：允许跳过不等于允许无证据。
+    expect(() =>
+      tracking.record({ platform: PLATFORM, jobId: 'job-1', to: 'delivered', sourceRef: '', at: NOW + 1 }),
+    ).toThrow(/来源引用/);
+    tracking.record({ platform: PLATFORM, jobId: 'job-1', to: 'delivered', sourceRef: 'ledger:1', at: NOW + 2 });
+    expect(tracking.current(PLATFORM, 'job-1').state).toBe('delivered');
+
+    tracking.record({ platform: PLATFORM, jobId: 'job-2', to: 'captured', sourceRef: 'capture:2', at: NOW });
+    tracking.record({ platform: PLATFORM, jobId: 'job-2', to: 'matched', sourceRef: 'match:2', at: NOW + 1 });
+    tracking.record({ platform: PLATFORM, jobId: 'job-2', to: 'delivered', sourceRef: 'ledger:2', at: NOW + 2 });
+    expect(tracking.current(PLATFORM, 'job-2').state).toBe('delivered');
+  });
+
   it('只进不退：回退请求按 JOB_STATUS_BACKWARD 拒绝', async () => {
     const { tracking } = await boot();
     tracking.record({ platform: PLATFORM, jobId: 'job-1', to: 'captured', sourceRef: 'c', at: NOW });

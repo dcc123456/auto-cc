@@ -776,7 +776,8 @@
       "removeKeeps": "This job already has delivery/conversation records: deleting only removes the stored job and its captured details; delivery, conversation and tracking records are kept",
       "limitInlineLabel": "This run",
       "limitInlineUnit": "jobs",
-      "limitPlaceholderShort": "20"
+      "limitPlaceholderShort": "20",
+      "progressEta": " · about {{seconds}}s left"
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",
@@ -877,7 +878,11 @@
       "targetNone": "No target yet: pick a card with \"Deliver resume\" below",
       "targetChosen": "Target chosen: {{title}}; pick a file (or sample PDF), then press Submit",
       "submitButton": "Submit delivery",
-      "needTarget": "Pick a target first: press \"Deliver resume\" on a job card"
+      "needTarget": "Pick a target first: press \"Deliver resume\" on a job card",
+      "switchSemi": "Switch to semi-auto and resend",
+      "switchSemiHint": "Suggest mode never sends; after switching this job will really be delivered.",
+      "switchSemiDone": "Switched to semi-auto, resending this job",
+      "useSampleWait": "Rendering PDF: {{seconds}}s elapsed (first run often takes 1–2 min)"
     },
     "action": {
       "noBridge": "Bridge unavailable: not running inside the Electron host",
@@ -2476,7 +2481,10 @@
       },
       "actionTailor": "Tailor for this job",
       "reasonNoMaster": "No master resume yet: import one or use the fictional sample first",
-      "reasonTailorNeedsSelect": "Tick this job first, then tailor it"
+      "reasonTailorNeedsSelect": "Tick this job first, then tailor it",
+      "reloadTargets": "Reload library jobs",
+      "targetsHint": "Search and capture jobs on the Jobs page, then come back to pick them.",
+      "targetsReadFailed": "Could not read library jobs: {{message}}"
     }
   }
 }

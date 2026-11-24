@@ -51,3 +51,27 @@ export function liveWebContentsOf<T>(view: MaybeDeadView | null | undefined): T 
 export function isViewLive(view: MaybeDeadView | null | undefined): boolean {
   return liveWebContentsOf(view) !== null;
 }
+
+/**
+ * 页面层可见性：这一页此刻的 `document.visibilityState === 'visible'` 吗。
+ *
+ * 为什么还需要这一条（2026-11-24 QA 在最终包上撞出的 P0）：`BrowserWindow.isVisible()` 回答的是
+ * 「窗口对象算不算显示着」，在 macOS 上应用被隐藏（⌘H）或被完全遮挡时它**仍然回 true**，而页面自己的
+ * `visibilityState` 已经是 `hidden`。只按 `isVisible()` 判「窗口在不在前台」，后台投递就会被放过去：
+ * 页面点击不落页 → 留下一条 `unknown` 脏尝试，正好是那道闸本来要防的东西。
+ *
+ * 判据取 `mainFrame.visibilityState`：Electron 44 的 `WebFrameMain` 上就是这个字符串，与页面
+ * `document.visibilityState` 同源（窗口隐藏、最小化、完全遮挡时 Chromium 都把它降为 `hidden`）。
+ * @param contents 页面句柄；可以是 null / 已销毁 / 读不到（一律按「不可见」算——闸要防脏数据，宁可拒绝）
+ * @returns `visible` 时 true；其余情况 false
+ */
+export function pageVisibleOf(contents: unknown): boolean {
+  if (!isAliveContents(contents)) return false;
+  try {
+    const frame = (contents as { mainFrame?: { visibilityState?: unknown } }).mainFrame;
+    return frame?.visibilityState === 'visible';
+  } catch {
+    // `mainFrame` 在视图刚被销毁时可能抛（同 `isDestroyed` 那条）：只读口不许把异常抛给上层。
+    return false;
+  }
+}

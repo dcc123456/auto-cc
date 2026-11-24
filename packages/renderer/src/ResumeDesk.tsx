@@ -31,6 +31,7 @@ import { ResumePreviewModal } from './ResumePreviewModal';
 import { Banner, DeskButton, DeskSelect, DeskTextarea, Tag } from './ui/controls';
 import { DeskExplainer, DeskPathGuide } from './ui/disclosure';
 import { Modal } from './ui/overlays';
+import { useReloadWhenVisible } from './ui/view-visibility';
 import { useBridgeAction } from './useBridgeAction';
 import { useViewTrail } from './viewTrail';
 
@@ -156,18 +157,10 @@ export function ResumeDesk() {
   }, [bridge, read]);
 
   // 视图是 hidden 显隐而不是卸载；每次重新可见都重读，别的视图里导入的简历才会立刻出现。
-  useEffect(() => {
-    const host = document.querySelector<HTMLElement>('[data-view-scroll="resume"]');
-    if (!host || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) void read();
-      },
-      { threshold: 0 },
-    );
-    observer.observe(host);
-    return () => observer.disconnect();
+  const reloadOnVisible = useCallback(() => {
+    void read();
   }, [read]);
+  useReloadWhenVisible('resume', reloadOnVisible);
 
   const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
 

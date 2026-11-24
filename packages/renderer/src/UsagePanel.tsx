@@ -1,5 +1,6 @@
 import { Power, RefreshCw, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { useReloadWhenVisible } from './ui/view-visibility';
 import { useTranslation } from 'react-i18next';
 import {
   OUTBOUND_SAMPLE_ACTIONS,
@@ -79,6 +80,11 @@ export function UsagePanel() {
   useEffect(() => {
     void read();
   }, [read]);
+  // 切回「运行记录」就重读（2026-11-24 萌新 P1）：视图只改 display 不卸载，投递之后的账本
+  // 与 attempt 在挂载那一刻的快照里看不到，旧行为要求人手动点「重新读取用量/看板」才对齐。
+  useReloadWhenVisible('trust', () => {
+    void read();
+  });
 
   const { busy, notice, noticeTone, run } = useBridgeAction(read);
 
