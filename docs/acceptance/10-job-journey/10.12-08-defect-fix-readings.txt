@@ -30,3 +30,19 @@
   换来的只是程序内调用者的语义变化，而用户能感到的阻塞已经在渲染层消掉。这一条请 PMO 判是否还要动主进程契约。
 
 **截图**：`10.12-08-approval-card-deny.png`（确认单本体：批准 / 拒绝两颗键 + 收单后的那句「拒绝这一步：成功」）。
+
+## 补：暂停单号挂到按钮与 band 上（2026-11-24，治「点错卡」的根）
+
+`pause-approve` / `pause-deny` 现在各自带 `data-pause-request-id="<单号>"`；band 容器带
+`data-pause-request-ids="<按开单顺序的空格分隔清单>"`（**多张单时不给单数属性**——写一张就会撒谎；
+每张卡自己另有单数标记，投递确认单用它自己的 `approvalId`）。
+
+活体读数（同一时刻只有一张待决单，`agent.pause.pending()[0].requestId = 79b223a8-…`）：
+
+| 位置 | 读到 |
+| --- | --- |
+| band `data-pause-request-ids` | `79b223a8-e161-4f7b-b270-f58cc0553524` |
+| `pause-approve` `data-pause-request-id` | 同上 |
+| `pause-deny` `data-pause-request-id` | 同上 |
+
+三处与 `pending()[0].requestId` **逐字相同**——脚本与人从此都能先核单号再点，不必靠「哪只可见」猜。

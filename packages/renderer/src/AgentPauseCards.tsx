@@ -28,10 +28,21 @@ import type { PendingDecision, ResolvedPause } from './useAgentPause';
  * 08 稿原先给它的是 jade，那是"已经办成"的读数色，不给待表态的按钮）；
  * 拒绝那颗退成 `ghost`——拒绝什么都不发，不该被涂成危险色。
  * @param busy 正在执行的动作标签；非空时两颗都禁用，防止同一张单被按两次
+ * @param requestId 这两颗键所属的暂停单号（2026-11-24 第 13 片：同一时刻可能挂着多张单，
+ *   人只看得见卡片外形、脚本只能靠「哪只可见」猜，猜错就点到别的单上——`APPROVAL_NOT_FOUND` 之后
+ *   run 一直等到超时。单号挂在按钮上，「我按的是哪张单」就是从 DOM 直接读得到的事实）
  * @param onDecide 把人按下的那颗交出去（`approve` / `deny`）
  * @returns 一行两颗按钮
  */
-function ApproveDenyButtons({ busy, onDecide }: { busy?: string; onDecide: (decision: 'approve' | 'deny') => void }) {
+function ApproveDenyButtons({
+  busy,
+  requestId,
+  onDecide,
+}: {
+  busy?: string;
+  requestId: string;
+  onDecide: (decision: 'approve' | 'deny') => void;
+}) {
   const { t } = useTranslation();
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
   const busyLabel = busyReason === undefined ? undefined : t('agent.pause.reason.ACTION_BUSY');
@@ -45,6 +56,7 @@ function ApproveDenyButtons({ busy, onDecide }: { busy?: string; onDecide: (deci
         disabled={busyReason !== undefined}
         disabledReason={busyReason}
         disabledReasonLabel={busyLabel}
+        markers={{ 'pause-request-id': requestId }}
         onClick={() => onDecide('approve')}
       >
         <Check size={12} />
@@ -58,6 +70,7 @@ function ApproveDenyButtons({ busy, onDecide }: { busy?: string; onDecide: (deci
         disabled={busyReason !== undefined}
         disabledReason={busyReason}
         disabledReasonLabel={busyLabel}
+        markers={{ 'pause-request-id': requestId }}
         onClick={() => onDecide('deny')}
       >
         <X size={12} />
@@ -133,7 +146,11 @@ function ApprovalCard({
           <Clock size={10} />
           {t('agent.pause.timeoutNote')}
         </p>
-        <ApproveDenyButtons busy={busy} onDecide={(decision) => onRespond(card, { decision })} />
+        <ApproveDenyButtons
+          busy={busy}
+          requestId={card.requestId}
+          onDecide={(decision) => onRespond(card, { decision })}
+        />
       </div>
     </Banner>
   );
@@ -189,7 +206,11 @@ function DeliverApprovalCard({
           <Clock size={10} />
           {t('agent.pause.timeoutNote')}
         </p>
-        <ApproveDenyButtons busy={busy} onDecide={(decision) => onDecide({ decision })} />
+        <ApproveDenyButtons
+          busy={busy}
+          requestId={approval.approvalId}
+          onDecide={(decision) => onDecide({ decision })}
+        />
       </div>
     </Banner>
   );
@@ -325,12 +346,17 @@ export function AgentPauseCards({
   // agent 那一路把「哪张单」由卡片自己带回来，这里按来源包一次；投递那一路在各自卡片里已经闭包了来源。
   const respondToAgent = (card: AgentPauseView, answer: AgentPauseAnswer): void =>
     onRespond({ origin: 'agent', card }, answer);
+  // 单号清单（按开单顺序）：挂着多张单时**不写单数属性**——写一张就会撒谎；每张卡自己另有单数标记。
+  const requestIds = (cards ?? [])
+    .map((decision) => (decision.origin === 'deliver' ? decision.card.approvalId : decision.card.requestId))
+    .join(' ');
   if (count === 0 && !resolved && !notice) return null;
   return (
     <li
       data-testid="agent-pause-band"
       data-pause-count={String(count)}
       data-pause-deliver-count={String(deliverCount)}
+      data-pause-request-ids={requestIds}
       className="rounded-xl border border-line bg-ink-900/60"
     >
       <header className="flex items-center gap-2 border-b border-line px-3 py-2">
