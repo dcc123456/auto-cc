@@ -83,3 +83,39 @@ QA 之前想量的「站点分栏 408」在本机分栏比例下落在 422（160
 
 **门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
 `pnpm test` → `TEST_EXIT=0`（全绿）；renderer 已重打。
+
+## 第 13 轮：设计师 §11 四处美学问题 + 两条 P2
+
+**① 标签基线统一**：`DeskFilterField` 从「标签塞框内、框 32px」改成「标签在上（`STACK_LABEL`）、框 27px」，
+`unknown` 提示落到框下——与原生下拉同一基线（第三行不再一边高一边低）。
+**② 城市标签只出现一次**：城市占位从「选择城市」改成「不限」（`cityPlaceholderShort` 键删掉，不留死键），
+DOM 文本由「城市城市，如「上海」（可空）」变成 **「城市 / 不限」**。
+**③ 条数不再单独掉行**：内容宽 ≥672（`@2xl`）留在第一行；以下隐藏行内那只、在动作行右侧给紧凑一格
+「本轮 [20] 条」（`jd-limit-compact`，en 用短占位 `jobs`，不再被裁成 `Target coun`）。
+**④ footer 重排**：65 字提示从 footer 移到**正文末尾一整行**（`jd-remove-keeps`），footer 恢复
+`[删除] │ [目标 flex-1] [打开][生成][打招呼][投递]`，删除与主行动之间加 1px 竖线（`mx-1 h-4 w-px bg-line-strong`）。
+**P2**：关键词框 `max-w-[36rem]` 收口（1280/1600 从 686/1006 → **576**）；顶栏右簇加 `min-w-0 flex-wrap justify-end`，
+299 档不再有 19px 文档横滚。
+
+**活体读数（`tmp/g12/p49-aesthetic.mjs`，fixture）**
+
+| 视口 | 筛选卡 | 轨道 | 维度行数 | 城市标签出现 | 条数形态 | 无横滚 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 900 | 802 | 3 | 3 | 1（「城市 / 不限」） | 行内 | 是（sw=cw=900） |
+| 1024 | 926 | 3 | 3 | 1 | 行内 | 是 |
+| 1280 | 1054 | 3 | 3 | 1 | 行内 | 是 |
+| 1600 | 1374 | 3 | 3 | 1 | 行内 | 是 |
+| 299 | 201 | 1 | 9 | 1 | **动作行紧凑**（`jd-limit-compact` 可见、行内那只隐藏） | **是（sw=cw=299）** |
+
+**详情 footer（把一条岗位的追踪态 seeds 到 `greeted` 后再打开）**：
+`hintExists:true`、`hintAboveFooter:true`、文案原文「这条岗位已有投递/沟通记录：删除岗位只清库内岗位与抓到的详情，
+投递记录、沟通记录与追踪进度会保留」；`footerH:55`、`targetW:402`（>0，不再被挤成 0 宽）。
+
+**一条方法学（写下来省下一轮）**：`trackingByJob` 是渲染层在「清单变了」时重读的（effect 依赖 `jobList`），
+所以探针播完追踪态后要点一次「读库内清单」再开卡；只切视图不行（面板可能只是被隐藏、不重挂）。
+我第一遍就是没重读，`hintExists` 假阴性一次。
+
+**截图**：`10.12-01-jobs-final-{1024,1600}.png`（与改前/上一版同批 `md5` 全部互异）。
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
+`pnpm test` → `TEST_EXIT=0`，**2832 例全过**。

@@ -1742,7 +1742,7 @@ export function DeskSwatch({
 
 /** 筛选触发器的画法（具名档位：渲染层规范要求 JSX 里不许内联整串 class，spec 6.2-37）。 */
 const filterFieldClass = (disabled: boolean): string =>
-  `flex min-h-8 min-w-0 items-center gap-2 rounded-md border border-line bg-ink-950/60 px-2 py-1 text-left text-[11px] transition-colors ${
+  `flex h-[27px] min-w-0 items-center gap-2 rounded-md border border-line bg-ink-950/60 px-2 text-left text-[11px] transition-colors ${
     disabled ? 'opacity-40' : 'hover:border-line-strong hover:bg-ink-850'
   }`;
 
@@ -1801,7 +1801,10 @@ export function DeskFilterField({
   testid?: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5">
+    // 标签**在上**（2026-11-24 设计师 §11 ①）：同一行里原生下拉是「标签在上、框 27px」，
+    // 这只选择器原先把标签塞进框里、框 32px，两个框顶边差 21px，第三行看着就是歪的。
+    <label className={STACK_LABEL}>
+      <span>{label}</span>
       <button
         type="button"
         data-action={action}
@@ -1815,8 +1818,7 @@ export function DeskFilterField({
         }}
         className={filterFieldClass(disabled === true)}
       >
-        <span className="shrink-0 text-slate-500">{label}</span>
-        <span className={`min-w-0 flex-1 truncate ${value === '' ? 'text-slate-500' : 'text-slate-100'}`}>
+        <span className={`min-w-0 flex-1 truncate text-left ${value === '' ? 'text-slate-500' : 'text-slate-100'}`}>
           {value === '' ? placeholder : value}
         </span>
         <ChevronDown size={12} className="shrink-0 text-slate-500" />
@@ -1826,7 +1828,7 @@ export function DeskFilterField({
           {unknown}
         </span>
       )}
-    </div>
+    </label>
   );
 }
 

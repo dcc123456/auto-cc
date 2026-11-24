@@ -934,7 +934,7 @@ export function JobLabPanel() {
                   testid="jd-city"
                   label={t('jd.filterLabel.city')}
                   value={cityDraft}
-                  placeholder={t('jd.cityPlaceholder')}
+                  placeholder={t('jd.filterAny')}
                   unknown={
                     cityDraft !== '' && !cityFilter.labels.includes(cityDraft)
                       ? t('jd.picker.unknown', { value: cityDraft })
@@ -950,16 +950,21 @@ export function JobLabPanel() {
               value={keywordDraft}
               onValueChange={setKeywordDraft}
               placeholder={t('jd.keywordPlaceholder')}
+              className="max-w-[36rem]"
             />
-            <DeskField
-              action="jd-limit"
-              type="number"
-              min={1}
-              data-testid="jd-limit"
-              value={limitDraft}
-              onValueChange={setLimitDraft}
-              placeholder={t('jd.limitPlaceholder')}
-            />
+            {/* 条数（2026-11-24 设计师 §11 ③）：内容宽 ≥672 时留在第一行；更窄时它挪到动作行右侧，
+                不再单独掉一行。两只输入框共用同一份草稿，窄档只有紧凑那只可见。 */}
+            <div className="hidden @2xl:block">
+              <DeskField
+                action="jd-limit"
+                type="number"
+                min={1}
+                data-testid="jd-limit"
+                value={limitDraft}
+                onValueChange={setLimitDraft}
+                placeholder={t('jd.limitPlaceholder')}
+              />
+            </div>
           </div>
           {/* 经验那一维：平台声明了码表就走下面的筛选网格（单选下拉），没声明才留这只手输框。 */}
           {declaresExperience ? null : (
@@ -1095,6 +1100,20 @@ export function JobLabPanel() {
               <Database size={12} />
               {t('jd.listButton')}
             </DeskButton>
+            <span className="ml-auto flex items-center gap-1 text-[11px] text-slate-400 @2xl:hidden">
+              <span className="shrink-0">{t('jd.limitInlineLabel')}</span>
+              <DeskField
+                action="jd-limit-compact"
+                type="number"
+                min={1}
+                data-testid="jd-limit-compact"
+                value={limitDraft}
+                onValueChange={setLimitDraft}
+                placeholder={t('jd.limitPlaceholderShort')}
+                className="w-16"
+              />
+              <span className="shrink-0">{t('jd.limitInlineUnit')}</span>
+            </span>
           </div>
         </div>
 
@@ -1358,14 +1377,6 @@ export function JobLabPanel() {
                   </DeskButton>
                 ) : (
                   <>
-                    {/* 已投递/已沟通的岗位：**武装之前**先给一次提示（2026-11-24 第 12 轮裁定②）。
-                        判据用库里真有的两位：`jobs` 行的 `replied` 与 `journey.tracking` 的状态——
-                        这两样都说明「这条岗位有过真实往来」，删掉岗位不该让人以为记录也一起没了。 */}
-                    {hasRecords(selectedRow) ? (
-                      <span className="text-[11px] text-amber" data-testid="jd-remove-keeps">
-                        {t('jd.removeKeeps')}
-                      </span>
-                    ) : null}
                     {/* 删除（2026-11-24 裁定）：两步确认——第一下只武装、四秒内再按一下才删；
                         确认文案里写明「投递与沟通记录会保留」，因为账本/投递/追踪/会话一条都不动。 */}
                     <ArmButton
@@ -1377,6 +1388,8 @@ export function JobLabPanel() {
                     >
                       {t('jd.removeButton')}
                     </ArmButton>
+                    {/* 删除与主行动之间一道 1px 竖线：它们不是同一类动作，挨着排会被读成「一起按」 */}
+                    <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-line-strong" />
                     <span className="min-w-0 flex-1 truncate text-[11px] text-slate-400" data-testid="jd-action-target">
                       {t('jd.actionTarget', { title: selectedRow.title, company: selectedRow.company })}
                     </span>
@@ -1518,6 +1531,14 @@ export function JobLabPanel() {
                       <DeskProgressLog entries={greetProgressEntries} testId="jd-greet-progress-log" className="mt-1" />
                     </div>
                   )}
+                  {/* 已投递/已沟通的岗位：**武装之前**先给一次提示（2026-11-24 第 12 轮裁定②）。
+                      放在正文末尾（footer 上方整行）而不是 footer 里——footer 一被这 65 字撑开，
+                      「这一行的岗位」那行字就被挤成 0 宽（设计师 §11 ④ 的读数）。 */}
+                  {hasRecords(selectedRow) ? (
+                    <p className="mt-2 text-[11px] text-amber" data-testid="jd-remove-keeps">
+                      {t('jd.removeKeeps')}
+                    </p>
+                  ) : null}
                 </div>
               )}
             </Modal>

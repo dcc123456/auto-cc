@@ -350,7 +350,7 @@ export function App() {
           <h1 className="font-display text-sm font-semibold tracking-wide">{t('title')}</h1>
           <p className="text-[11px] text-slate-400">{t('subtitle')}</p>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           {/* 三颗系统级键都是"宽带文字、窄带图标"（<1120px 退成纯图标）：窗口一窄，
               最先被挤出标题栏的就是这一排，而它们各自只有一颗图标认得出来。 */}
           <DeskButton

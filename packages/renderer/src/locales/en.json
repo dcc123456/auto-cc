@@ -766,7 +766,10 @@
       "removeAction": "Delete job",
       "removeDone": "Removed “{{title}}” from the library (ledger/delivery/tracking untouched)",
       "removeGone": "That job is no longer in the library",
-      "removeKeeps": "This job already has delivery/conversation records: deleting only removes the stored job and its captured details; delivery, conversation and tracking records are kept"
+      "removeKeeps": "This job already has delivery/conversation records: deleting only removes the stored job and its captured details; delivery, conversation and tracking records are kept",
+      "limitInlineLabel": "This run",
+      "limitInlineUnit": "jobs",
+      "limitPlaceholderShort": "20"
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",
