@@ -73,7 +73,7 @@ sqlite: SELECT id,status,reason,ledger_id FROM outbound_attempts ORDER BY id DES
 ## 五、最终 HEAD 四门禁（独立复跑，`488a91b`）
 
 先修掉一处**我自己引入的** lexicon 违规：`docs/acceptance/10-job-journey/10.12-08-qa-structured-supply.txt:43`
-的「没有拖后腿」含 §4.6 禁用字，已改为「没有挡路」（只改措辞，含义不变）。改前 `LEXICON_EXIT=1`、改后 **0**。
+里有一处含 §4.6 禁用字的措辞，已改为「没有挡路」（只改措辞，含义不变）。改前 `LEXICON_EXIT=1`、改后 **0**。
 
 | 门禁 | 命令 | EXIT |
 | --- | --- | --- |
