@@ -1,0 +1,32 @@
+# 10.10-26 「城市无法输入搜索」QA 只读复现
+
+- 日期：2026-11-24
+- 复现人：刁钻的QA（只读，未改任何代码）
+- 构建：`dist/mac-arm64/auto-cc.app`（asar 17:59）
+- 实例 A（real）：`--remote-debugging-port=10430`、`--user-data-dir=/private/tmp/qa16-real-ud`（无 `settings.json`，默认 `pack=real`，城市码表 373 项）
+- 实例 B（fixture）：`--remote-debugging-port=10431`、`--user-data-dir=/private/tmp/qa16-fix-ud`（`settings.json` 只有 `pack=fixture`）
+- 两实例窗口 `document.visibilityState = "visible"`
+
+## 一、`pack=real`：城市是按钮 + `DeskOptionPicker` 面板
+
+| 判据 | 读数 | 结论 |
+| --- | --- | --- |
+| 点开即聚焦 | 点城市后 `document.activeElement = BODY`；面板里确有搜索框（placeholder「搜索…」、`tabIndex=0`、`readOnly=false`、`disabled=false`） | **不成立**：打开面板不把焦点放到搜索框 |
+| 输入即过滤 | 城市候选 `[data-action^="jd-picker-city-"]`（排除 back/clear/search/done）**373 → 1**，过滤后 label = `杭州` | **成立** |
+| 选中回填触发行 | 点 `jd-picker-city-杭州` → 点 `jd-picker-city-done` → 面板关闭，触发行 `[data-action=jd-city]` 文本变 **「杭州」** | **成立** |
+| 打错给 amber | 输入「不存在城市xyz」→ 提示「没有匹配项，换个词或点「清除」」，class 是 `text-[11px] text-slate-500`；全页 `[class*="amber"]` 里没有与城市搜索相关的一条 | **不成立**：给的是中性灰提示，不是 amber |
+| Esc 只关面板 | `body` 上派 `Escape` → 面板关闭；在搜索框里派 `Escape` → 面板关闭，未触发导航 | 成立 |
+| 键盘事件是否被父层吃掉 | 搜索框自身 `keydown` 监听能收到派发事件（计数 1）；用原生 setter + `input` 事件后 `value='杭州'`、过滤生效 | 未被拦截 |
+
+**补充**：搜索框本身不是坏的——`search.focus()` 能把 `activeElement` 变成该输入框。所以「无法输入搜索」的成因是**打开面板时没有自动聚焦**：用户点开面板直接敲键盘，字进不到输入框（焦点在 `BODY`），必须先手动点一下搜索框才灵。
+
+## 二、`pack=fixture`：城市是手输框
+
+- 触发行元素是 `INPUT`（不是 button），`data-testid=jd-city`、placeholder「城市，如「上海」（可空）」、`readOnly=false`、`disabled=false`；
+- 原生 setter + `input` 事件后 `value = 杭州`，手输正常。
+
+## 三、给开发的结论（不臆测修法，只报事实）
+
+1. **可复现缺陷（P2）**：`pack=real` 下点开城市面板不会自动聚焦搜索框（`activeElement=BODY`）——这与用户「城市无法输入搜索」的体验一致。加 `autoFocus`／打开后 `effect` 聚焦即可，但这属于实现选择，由开发定。
+2. **口径差（P3）**：无匹配时是中性灰提示，没有 amber 警示；若「打错给 amber」是既定判据，这一条不成立，需明确是改样式还是改判据。
+3. 过滤（373→1）、选中回填（「杭州」）、Esc 只关面板、键盘事件不被拦截——这四项都正常，不需要改。
