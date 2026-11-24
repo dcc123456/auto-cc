@@ -1,0 +1,59 @@
+# 第 13 片补读数：一键停用（多目标 run）与未登记来源写动作 fail-closed
+
+环境：隔离树内容 = `c0cb27c`（`10360f7` 只改了最小窗口与文案，跑的是同一份安全路径）、
+userData 副本 `/tmp/qa12-ud-del`、CDP 10410、本机仿站 `127.0.0.1:10233` + 临时未登记页面 `127.0.0.1:10412`、2026-11-24 12:45–13:05。
+**未碰真站**（`platform-boss` 的 `pack` 全程 `fixture`）。
+
+## ① 一键停用（多目标 + 有额度）
+
+先造出「能真跑」的授权单（副本库里 seeded，标注在此）：克隆母版/变体两条 `resume_docs`（`qa-master` / `qa-custom`，
+后者 `parent_doc_id = qa-master`）与一条 `resume_generations` 回执（`qa-gen-1`，`doc_id = qa-master`、`status = reorder_only`、
+`violations_json = []`），然后：
+
+| 步骤 | 读数 |
+| --- | --- |
+| 授权单 | `grant` → `status:"active"`、`targets:["job-S1","job-S2"]`、`dailyLimit:5`（**多目标**） |
+| 额度 | `entitlement.dailyLimits.greet` 恢复为 **20**（之前被我压到 1） |
+| 启动执行器 | `unattended.start` → `lastError:null`；`view.status = running` |
+| 点一键停用 | `unattended.stop` **当场**返回 `state:"stopping"` |
+| 6 秒内轮询 | 每 500ms 一次，12 次全部 `stopping` |
+| 落定 | **68 秒后** `status:"stopped"`（`4s: stopping → 68s: stopped`） |
+| 停用期间账本 | `usage_ledger 13`、`outbound_attempts 7`、`delivery_records 0` —— **全程零增** |
+
+判读：`stopping` 是「人按了停止、但循环还在岗间睡眠里（规格上限 150s）」的如实状态，68 秒落在上限之内；
+停用后账本与尝试表都没有任何新行 —— **一键停用即时生效（不再产生外发）成立**。
+
+## ② 未登记来源写动作 → fail-closed
+
+在 QA 端口起了一个**未由任何平台声明**的本机页面 `http://127.0.0.1:10412/`（页面里有个按钮，自记 `window.__taps`）：
+
+| 步骤 | 读数 |
+| --- | --- |
+| 导航内核视图到该页 | `kernelViewUrl = http://127.0.0.1:10412/` |
+| 调 `browser['act.click']` | `{ok:false, code:"WRITE_ORIGIN_UNREGISTERED"}`，`details: {url:"http://127.0.0.1:10412/", action:"click", origin:"http://127.0.0.1:10412"}` |
+| 错误原文 | 「当前页面 http://127.0.0.1:10412 不是任何已登记平台声明的源：助手不在上面做「click」，**一个动作都没有派发**」 |
+| 页面自记点击次数 | `window.__taps = 0`、计数文案 `0` —— **零脚本发出** |
+
+判据三条都满足：错误码是 `WRITE_ORIGIN_UNREGISTERED`、`details` 带 `url/action/origin`、页面侧动作计数为 **0**。
+
+## ③ 审批卡活体：**仍未取到（等开发桩）**
+
+- 远端 HEAD 到 `a20218e` 为止，`packages/agent` 里没有确定性桩（`grep -c "stub"` = 0）；
+- 当前实例 `agent.loop.propose` 仍是 `AGENT_PLANNER_REQUEST_FAILED：模型返回空回复`，`pause-approve / pause-deny / stop-run` 一个都不渲染。
+- 所以「批准 / 拒绝 / 停止各一次」这三条**没有读数**，等桩落地后补。
+
+## 结论
+
+- ① 一键停用：**通过**（`running → stopping（当场）→ stopped（68s）`，账本零增）。
+- ② 未登记来源写动作：**通过**（`WRITE_ORIGIN_UNREGISTERED` + details 三件 + 页面自记 0）。
+- ③ 审批卡：**遗留**（缺确定性桩，无活体读数）。
+
+## 复现命令
+
+```
+node /private/tmp/qa-11/stop1.mjs   # 授权单（2 目标）+ 启动 + 当场 stop + 6 秒状态序列 + 计数
+node /private/tmp/qa-11/stop2.mjs   # 4 秒一采，等到 stopped（本轮 68s）
+node /private/tmp/qa-11/unreg-server.mjs &        # 未登记来源页面（10412）
+node /private/tmp/qa-11/unreg5.mjs  # act.click → WRITE_ORIGIN_UNREGISTERED
+node /private/tmp/qa-11/taps.mjs    # 页面自记点击次数（0）
+```
