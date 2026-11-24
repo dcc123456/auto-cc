@@ -55,3 +55,15 @@ node /private/tmp/qa-11/rinspect.mjs          # 读 tools.list 的 supply 三格
 node /private/tmp/qa-11/chain2.mjs            # /plan → 确认 → 批准 → 填三格 → 提交（含 DB 前后计数）
 sqlite: SELECT id,status,reason,ledger_id FROM outbound_attempts ORDER BY id DESC LIMIT 1
 ```
+
+---
+
+## 四、澄清两轮「零增」：一条是页面在等、一条是去重拦截（都不是缺陷）
+
+| 轮 | 目标 | 现象 | 定性 |
+| --- | --- | --- | --- |
+| 1 | `job-QA` | `attempts +1`（新 attempt `id 8`，`status:"in-flight"`、`ledger_id:null`）、`ledger` 未增、run 仍 `running` | **页面在等**：内核视图停在 `…/chat?targetId=job-QA`，这一步还没真正落到发送，`in-flight` 是过程态不是失败；我随后把该 run 叫停 |
+| 2 | `job-B` | `ledger` 与 `attempts` **都零增** | **去重闸门拦截**：`boss\|job-B\|greet\|unversioned` 这个四元组此前已成功发过（attempt #7、ledger 第 13 行），重复发必须零增——这正是重放判据在起作用 |
+
+**这两条零增都不是缺陷**，也不是结构化卡的问题：同一张卡在轮 2 里三格都填对了、入参一次过 schema、待决单正常收掉。
+要拿到「各恰增 1」的干净读数，需要一个**从未发过的新目标**（下节）。
