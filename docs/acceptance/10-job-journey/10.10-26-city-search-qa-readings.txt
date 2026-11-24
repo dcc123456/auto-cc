@@ -134,3 +134,34 @@ usage_ledger 1（未增） / delivery_records 0
 **结论**：六条里，样例 PDF 兜底、只建议拦截与就地切档、切档后真发出并落账、投递后同帧四条**过**；**授权格仍不过**（死路仍在，与萌新一致）；窗口闸与 ETA/秒数两条**未取到**。
 
 **给开发的具体问题（授权格）**：点「先定制这一岗」后按钮整组进入 `aria-disabled=true` 且不再恢复、卡片仍「定制 无 · 回执 无」——像是 tailor 请求既没成功也没失败地悬着（萌新读到「上一个动作还没结束」一直不消）。请给「定制中/失败原因/重试」三态中的明确一态，别让整组按钮永久禁用。
+
+## 八、按管理员口径补的两条（同一包 `513bbeb2…`，实例 `--user-data-dir=/private/tmp/qa21-ud`）
+
+### ① ETA 秒数：取到真读数（过）
+
+抓取上限调到 20（`jd-limit=20`），抓取过程中每 300ms 连续采样：读到
+`data-eta-seconds="2"`、正文「**约剩 2 秒**」、同帧摘要「已入库 11/20」。本轮只采到 1 个样本（抓取很快结束），但这格**确实存在且带真实数值**，不是只有转圈。
+
+### ② 样例 PDF 已用秒数：出现但停在 0（按约定不判失败）
+
+展开投递表单后点「生成并使用样例 PDF」，每 120ms 采样 `data-elapsed-seconds`：
+
+```
+t=0ms   → 0
+t=120ms → 0
+t=240ms → 「PDF 已生成（1 页）」
+```
+
+即「PDF 正在生成：已用 0 秒」这一格**确实出现**并带秒数字段，本机生成 <1 秒所以数值停在 0（`resume_docs 0→1` 同时完成）。按管理员口径记「出现但未走到 1 秒」，不判失败也不判通过。
+
+### ③ 窗口不可见闸：环境无法制造稳定 hidden，记未验证
+
+三次尝试都拿不到 `visibilityState === 'hidden'`：
+
+| 尝试 | 读数 |
+| --- | --- |
+| `System Events … set visible of process "auto-cc" to false` | 调用后 `document.visibilityState` 仍是 `visible` |
+| `System Events … set value of attribute "AXMinimized" …` | 报错 `osascript 不允许辅助访问 (-1719)` |
+| 隐藏后立即在 eval 里先断言再调用 | 断言 `v0='visible'`，按约定直接 skip，未发起投递（`attempts 0 / ledger 1 / deliveries 0` 未变） |
+
+按管理员口径记「**环境无法制造，未验证**」，不由 QA 判过；请开发给一条可复跑的机器读数路径（例如测试里 `win.hide()` 或 `app.hide()` + 调用前断言 `visibilityState==='hidden'`）。
