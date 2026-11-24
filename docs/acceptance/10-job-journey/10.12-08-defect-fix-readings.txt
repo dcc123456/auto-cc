@@ -46,3 +46,29 @@
 | `pause-deny` `data-pause-request-id` | 同上 |
 
 三处与 `pending()[0].requestId` **逐字相同**——脚本与人从此都能先核单号再点，不必靠「哪只可见」猜。
+
+## 补：补信息卡改成按工具 schema 声明的结构化字段（R13-8，P1）
+
+**为什么不能让人填 JSON**：QA 连填两种形状都报 `Unrecognized key: "jobId"`——形状只能靠报错反推，
+真实使用中等于审批链在此断掉。JSON 只能是交换格式，不能是界面形态。
+
+**做法**
+- `ToolSupplyField`（`packages/core/src/events.ts`）：`{ path, labelKey, kind: 'text'|'textarea'|'select', optional?, options?, optionsFrom? }`。
+  由**工具登记方**声明，不从 zod 内部结构内省（`_def` 不是稳定 API）；声明只描述画法与组装路径，不参与校验。
+- `agent.tools.list()` 把它带进 `ToolDescriptorView.supply`（渲染层只读这一份）。
+- `outbound.greet.perform` 声明三格：`request.platform`（下拉，取值现问 `platform.registry.list`）、
+  `request.jobId`（文本、可选）、`request.text`（文本域）。
+- 界面（`AgentPauseCards` 的 `ElicitationCard`）：有声明就按格子画，`assembleSupply()` 按点路径**拼出嵌套对象**，
+  提交时 `JSON.stringify` 交回（`{request:{…}}` 这层由代码拼）；可选项留空即整格不写；没声明的工具退回旧文本域。
+
+**活体（半自动 + 桩，`/plan outbound.greet.perform` → 确认 → 批准）**
+
+| 读点 | 读数 |
+| --- | --- |
+| 卡片形态 | `structured:true`、`legacyTextarea:false`；三格 `select` / `input` / `textarea`，平台选项 `["", "boss"]` |
+| 提交 | `pending` 1 → **0**；卡片消失 |
+| 入参（库里的观察原文） | `入参经人补充 1 轮，实际使用：{"request":{"platform":"boss","jobId":"1","text":"你好，看到贵司在招前端，想聊聊"}}` |
+| 这一步的结局 | `failed` / `TOOL_FAILED`：「平台 boss 还没有一份自动化风险确认记录，先确认承担该风险」——**闸门在拦，不是形状不对** |
+
+也就是说：**人只填了三格值，`{request:{…}}` 是代码拼的**，提交后入参一次通过工具自己的 schema，
+run 正常推进到执行（再被风险确认闸门挡住，零外发）。（这一格的证据是 DOM 与库里的观察原文；没有另存截图，卡面读数见上表。）

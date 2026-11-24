@@ -1732,6 +1732,14 @@
         "actionResume": "继续被接管按住的任务",
         "resumeHint": "要继续的那一步若会动手，恢复前先重读页面，不复用接管前的快照",
         "resumeHeldHint": "页面仍在人工接管中，先交还页面再按继续"
+      },
+      "supply": {
+        "hint": "按格子填就行，不用写 JSON；可选项留空即不填",
+        "optional": "（可选）",
+        "pick": "请选择",
+        "platform": "平台",
+        "jobId": "岗位 id",
+        "text": "打招呼文案"
       }
     },
     "resumeForm": {

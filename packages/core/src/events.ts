@@ -1448,6 +1448,29 @@ export const TOOL_EFFECTS = ['read', 'local-write', 'outbound'] as const;
 
 export type ToolEffect = (typeof TOOL_EFFECTS)[number];
 
+/**
+ * 补充信息卡上的一格（spec 5.3-09 / R13-8）。
+ *
+ * 为什么由登记方声明而不是从 zod 内省：zod 的 `_def` 不是稳定 API，从它推字段等于让界面长在库的内部结构上；
+ * 而「这一步缺什么、缺的那格叫什么」本来就是这个工具自己知道的事。声明写在这一处，
+ * 卡片按它画、提交按 `path` 组装，用户永远不用看见 JSON（JSON 只是交换格式）。
+ */
+export type ToolSupplyFieldKind = 'text' | 'textarea' | 'select';
+
+export type ToolSupplyField = {
+  /** 入参里的点路径（`request.platform`），提交时按它组装嵌套对象 */
+  readonly path: string;
+  /** 界面标签的语言包键 */
+  readonly labelKey: string;
+  readonly kind: ToolSupplyFieldKind;
+  /** 省缺即必填；可选项留空按「不填」处理，不会被写成空串 */
+  readonly optional?: boolean;
+  /** `kind: 'select'` 的固定取值表 */
+  readonly options?: readonly string[];
+  /** `kind: 'select'` 的取值来源（`platforms` = 已登记平台清单，界面现问登记处） */
+  readonly optionsFrom?: 'platforms';
+};
+
 /** 工具注册表对外可见的元数据（`run` 与 schema 实例过不了 IPC，也不该过）。 */
 export type ToolDescriptorView = {
   id: string;
@@ -1457,6 +1480,8 @@ export type ToolDescriptorView = {
   description: string;
   effect: ToolEffect;
   requiresConfirmation: boolean;
+  /** 补充信息卡按它画格子（省略则退回「让人自己填 JSON」那一种老形态，见 {@link ToolSupplyField}） */
+  supply?: readonly ToolSupplyField[];
 };
 
 /**
@@ -1562,6 +1587,14 @@ export interface AgentToolDeclaration<I = unknown, R = unknown> {
   readonly effect: ToolEffect;
   /** 是否需要用户先批准再执行；P2 只登记值，强制属 P5 */
   readonly requiresConfirmation: boolean;
+  /**
+   * 补充信息卡上要画哪几格（spec 5.3-09 的界面半边，R13-8）。
+   *
+   * 省略时卡片退回旧的「一个 JSON 文本框」形态——那对新手等于不可用（形状只能靠报错反推），
+   * 所以凡是会走到补充信息单的外发工具都应当声明它；声明只描述**画法与组装路径**，不参与校验
+   * （校验仍然只有 `agent.tools.validateInput` 一处）。
+   */
+  readonly supply?: readonly ToolSupplyField[];
   /**
    * 「已登记但暂不开放」（spec 5.1-10）。省略即开放。
    *

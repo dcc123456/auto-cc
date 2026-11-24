@@ -1732,6 +1732,14 @@
         "actionResume": "resume the task held by takeover",
         "resumeHint": "If the step about to run acts on the page, resuming re-reads it first instead of reusing the pre-takeover snapshot",
         "resumeHeldHint": "The page is still under manual takeover — hand it back before pressing resume"
+      },
+      "supply": {
+        "hint": "Fill the fields below — no JSON needed; leave optional ones empty",
+        "optional": " (optional)",
+        "pick": "Choose",
+        "platform": "Platform",
+        "jobId": "Job id",
+        "text": "Greeting text"
       }
     },
     "resumeForm": {

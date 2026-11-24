@@ -119,6 +119,7 @@ export type {
   TakeoverStateView,
   ToolCallReply,
   ToolDescriptorView,
+  ToolSupplyField,
   ToolEffect,
   WorkflowEvidenceView,
   WorkflowGraphLoadView,

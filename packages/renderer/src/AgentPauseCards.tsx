@@ -14,11 +14,17 @@
  * 甚至表态之后的那张卡，走的都是同一条路——界面上不存在「以为还有卡片」的余地。
  */
 import { Check, CircleAlert, Clock, ShieldQuestion, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentPauseAnswer, AgentPauseView, DeliverApprovalView, ToolDescriptorView } from '@auto-cc/shared';
+import type {
+  AgentPauseAnswer,
+  AgentPauseView,
+  DeliverApprovalView,
+  ToolDescriptorView,
+  ToolSupplyField,
+} from '@auto-cc/shared';
 import { greetTargetLabel } from '@auto-cc/shared';
-import { Banner, DeskButton, DeskTextarea } from './ui/controls';
+import { Banner, DeskButton, DeskField, DeskSelect, DeskTextarea } from './ui/controls';
 import type { PendingDecision, ResolvedPause } from './useAgentPause';
 
 /**
@@ -217,6 +223,38 @@ function DeliverApprovalCard({
 }
 
 /**
+ * 把「按格子填的值」组装成工具的入参对象（R13-8）。
+ *
+ * 描述里只有一件事值得解释：**嵌套由代码拼**。`request.platform` 这种点路径按段建对象，
+ * 于是人只填值、不写 `{request:{…}}`；可选项留空就整格不写（写空串会让 `min(1)` 之类当场判红，
+ * 那是把「没填」记成「填了空」）。本函数不校验——校验仍然只有 `agent.tools.validateInput` 一处。
+ * @param fields 工具声明的格子（顺序即界面顺序）
+ * @param values 每格的值（按 `path` 索引，未填为 undefined 或空串）
+ * @returns 组装好的入参对象
+ */
+function assembleSupply(
+  fields: readonly ToolSupplyField[],
+  values: Readonly<Record<string, string>>,
+): Record<string, unknown> {
+  const assembled: Record<string, unknown> = {};
+  for (const field of fields) {
+    const raw = (values[field.path] ?? '').trim();
+    if (raw === '' && field.optional) continue;
+    const segments = field.path.split('.');
+    let cursor = assembled;
+    for (const segment of segments.slice(0, -1)) {
+      const next = cursor[segment];
+      const branch: Record<string, unknown> =
+        typeof next === 'object' && next !== null ? (next as Record<string, unknown>) : {};
+      cursor[segment] = branch;
+      cursor = branch;
+    }
+    cursor[segments[segments.length - 1] ?? field.path] = raw;
+  }
+  return assembled;
+}
+
+/**
  * 补充信息单（`elicitation`）：入参过不了工具自己声明的 schema，动手之前按契约问一句人。
  *
  * 文本域的内容只活在本组件里：它是**还没交出去的表态**，不是界面状态，交给主进程那一刻才算数（§2.5）。
@@ -236,13 +274,41 @@ function ElicitationCard({
   busy?: string;
   onRespond: (card: AgentPauseView, answer: AgentPauseAnswer) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [supplement, setSupplement] = useState('');
+  // 工具声明了格子就按格子画（R13-8）：人只填值，`{request:{…}}` 这层由 `assembleSupply` 拼。
+  const supplyFields = meta?.supply ?? [];
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [platforms, setPlatforms] = useState<readonly string[]>([]);
+  // 平台下拉的取值现问登记处（不在这里存第二份平台清单）；问不到就退回可手输，不拦人。
+  const needsPlatforms = supplyFields.some((field) => field.optionsFrom === 'platforms');
+  useEffect(() => {
+    if (!needsPlatforms) return;
+    let alive = true;
+    void window.autoCC?.platform['registry.list']().then((reply) => {
+      if (!alive || !reply?.ok) return;
+      setPlatforms(reply.value.platforms.map((platform) => platform.id));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [needsPlatforms]);
+  const assembled = assembleSupply(supplyFields, values);
+  const missingRequired = supplyFields.some((field) => !field.optional && (values[field.path] ?? '').trim() === '');
   // 「缺字段」是工具现报的，这张卡在墨案里属于「系统在说话」那一档（青瓷），与琥珀的待批准卡分开画法；
   // 提交那颗只是把人写的补充交回去让判定再跑一次，本身不外发，所以是 amber 而不是 seal。
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
   const busyLabel = busyReason === undefined ? undefined : t('agent.pause.reason.ACTION_BUSY');
-  const supplyReason = busyReason ?? (supplement.trim() === '' ? 'SUPPLEMENT_EMPTY' : undefined);
+  const isStructured = supplyFields.length > 0;
+  const supplementEmpty = isStructured ? missingRequired : supplement.trim() === '';
+  const supplyReason = busyReason ?? (supplementEmpty ? 'SUPPLEMENT_EMPTY' : undefined);
+  /** 提交这一格：结构化时交组装好的对象（JSON 只做交换格式），否则交人写的那段原文。 */
+  const submitSupply = (): void => {
+    onRespond(card, {
+      decision: 'supply',
+      text: isStructured ? JSON.stringify(assembled) : supplement,
+    });
+  };
   return (
     <Banner
       tone="celadon"
@@ -269,15 +335,67 @@ function ElicitationCard({
         <p className="mt-1 text-[10px] text-slate-500" data-pause-round-label={String(card.round)}>
           {t('agent.pause.round', { round: card.round })}
         </p>
-        <DeskTextarea
-          action="agent-pause-supply"
-          data-testid="agent-pause-supply-input"
-          rows={2}
-          value={supplement}
-          onValueChange={setSupplement}
-          placeholder={t('agent.pause.supplyPlaceholder')}
-          className="mt-2 w-full"
-        />
+        {isStructured ? (
+          <div className="mt-2 flex flex-col gap-2" data-testid="agent-pause-supply-fields">
+            <p className="text-[10px] text-slate-500">{t('agent.supply.hint')}</p>
+            {supplyFields.map((field) => {
+              const options = field.options ?? (field.optionsFrom === 'platforms' ? platforms : []);
+              const segment = field.path.split('.').at(-1) ?? field.path;
+              const label = i18n.exists(field.labelKey) ? t(field.labelKey) : field.path;
+              return (
+                <label key={field.path} className="flex flex-col gap-1 text-[11px] text-slate-300">
+                  <span>
+                    {label}
+                    {field.optional ? <span className="text-slate-500">{t('agent.supply.optional')}</span> : null}
+                  </span>
+                  {field.kind === 'textarea' ? (
+                    <DeskTextarea
+                      action={`agent-pause-supply-${segment}`}
+                      data-testid={`agent-pause-supply-input-${segment}`}
+                      rows={2}
+                      value={values[field.path] ?? ''}
+                      onValueChange={(value) => setValues((previous) => ({ ...previous, [field.path]: value }))}
+                      className="w-full"
+                    />
+                  ) : field.kind === 'select' ? (
+                    <DeskSelect
+                      action={`agent-pause-supply-${segment}`}
+                      data-testid={`agent-pause-supply-input-${segment}`}
+                      value={values[field.path] ?? ''}
+                      onValueChange={(value) => setValues((previous) => ({ ...previous, [field.path]: value }))}
+                      className="w-full"
+                    >
+                      <option value="">{t('agent.supply.pick')}</option>
+                      {options.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </DeskSelect>
+                  ) : (
+                    <DeskField
+                      action={`agent-pause-supply-${segment}`}
+                      data-testid={`agent-pause-supply-input-${segment}`}
+                      value={values[field.path] ?? ''}
+                      onValueChange={(value) => setValues((previous) => ({ ...previous, [field.path]: value }))}
+                      className="w-full"
+                    />
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        ) : (
+          <DeskTextarea
+            action="agent-pause-supply"
+            data-testid="agent-pause-supply-input"
+            rows={2}
+            value={supplement}
+            onValueChange={setSupplement}
+            placeholder={t('agent.pause.supplyPlaceholder')}
+            className="mt-2 w-full"
+          />
+        )}
         <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
           <Clock size={10} />
           {t('agent.pause.timeoutNote')}
@@ -291,7 +409,7 @@ function ElicitationCard({
             disabled={supplyReason !== undefined}
             disabledReason={supplyReason}
             disabledReasonLabel={supplyReason === undefined ? undefined : t(`agent.pause.reason.${supplyReason}`)}
-            onClick={() => onRespond(card, { decision: 'supply', text: supplement })}
+            onClick={submitSupply}
           >
             <Check size={12} />
             {t('agent.pause.submit')}

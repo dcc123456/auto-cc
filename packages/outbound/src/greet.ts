@@ -468,6 +468,12 @@ export class OutboundGreetService extends Service {
         }),
         effect: 'outbound',
         requiresConfirmation: true,
+        // 补充信息卡的三格（R13-8）：缺参数时人按格子填，`{request:{…}}` 这层由界面组装，不让他写 JSON。
+        supply: [
+          { path: 'request.platform', labelKey: 'agent.supply.platform', kind: 'select', optionsFrom: 'platforms' },
+          { path: 'request.jobId', labelKey: 'agent.supply.jobId', kind: 'text', optional: true },
+          { path: 'request.text', labelKey: 'agent.supply.text', kind: 'textarea' },
+        ],
         // 沉淀条款（spec 5.4-03）：这只手能被沉淀成哪一个工作流节点、参数从入参的哪条路径取。
         // 值全是 `input` 里的点路径字符串，不是闭包——`check-tool-contract.ts` 才机检得动（plan 5.4-a 落点）。
         // `kind` 写字面量而不写 `GREET_NODE_KIND`：机检第 10 条比的就是「这句字面量能不能对上某处

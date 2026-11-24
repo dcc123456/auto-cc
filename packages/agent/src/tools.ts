@@ -121,6 +121,7 @@ export class AgentToolsService extends Service {
         description: tool.description,
         effect: tool.effect,
         requiresConfirmation: tool.requiresConfirmation,
+        ...(tool.supply ? { supply: tool.supply } : {}),
       }));
   }
 
