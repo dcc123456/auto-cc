@@ -209,6 +209,20 @@ describe('导航许可（2026-11-22 裁定：只剩协议一道）', () => {
     expect(urls).toEqual(['http://127.0.0.1:10233/boss/detail?jobId=1001']);
   });
 
+  it('自动化永远按自动化判：真实域名被闸拦下，一次也没碰到内核', async () => {
+    const { page } = await boot(viewWithLoad(() => Promise.resolve()));
+    await expect(page.navigate('https://www.zhipin.com/web/geek/jobs')).rejects.toMatchObject({
+      code: 'REAL_PLATFORM_AUTOMATION_BLOCKED',
+    });
+  });
+
+  it('人给的地址那只口在没有网关标时结构化拒绝（主进程自动化路径借不到它）', async () => {
+    const { page } = await boot(viewWithLoad(() => Promise.resolve()));
+    await expect(page.navigateFromUser('https://www.zhipin.com/')).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+    });
+  });
+
   it('非 http(s) 协议仍被拦下，一次也没碰到内核', async () => {
     const urls: string[] = [];
     const { page } = await boot(

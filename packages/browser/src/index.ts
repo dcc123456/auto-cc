@@ -38,6 +38,7 @@ import {
   toSnapshotReading,
 } from './page-script.js';
 import type { SessionsService } from '@auto-cc/plugin-sessions';
+import { assertUserCall } from '@auto-cc/core';
 import { resolveAutomationUrl, resolveNavigableUrl } from './navigate-policy.js';
 
 export const browserPageSchema = z.strictObject({
@@ -110,11 +111,21 @@ export class BrowserPageService extends Service {
    * @returns 导航落定后的页面快照
    * @throws 协议不允许或地址解析失败时 `NAVIGATE_URL_REJECTED`；没有已挂载会话时 `NO_KERNEL_SESSION`
    */
-  navigate = async (url: string, source: 'user' | 'automation' = 'automation'): Promise<KernelPageSnapshotView> => {
-    // 来源只分两类：**人在地址栏/会话面板里给的地址**（user）与**自动化驱动**（其余一律按 automation 算，缺省即最严）。
-    // 真实站点上自动化会被 `resolveAutomationUrl` 拒掉，除非装配侧显式放行（人工在场）。
-    const target =
-      source === 'user' ? resolveNavigableUrl(url) : resolveAutomationUrl(url, this.config.allowRealAutomation);
+  navigate = async (url: string): Promise<KernelPageSnapshotView> => {
+    // 来源**不由参数决定**（参数可伪造）：这只口永远是自动化，真实站点一律被闸拦下，
+    // 除非装配侧显式放行（人工在场）。人给的地址走 `navigateFromUser`，那只口由网关打标后才可用。
+    return await this.loadPage(resolveAutomationUrl(url, this.config.allowRealAutomation));
+  };
+
+  /**
+   * 把内核视图导到已经过许可判定的目标，并等装载落定。
+   *
+   * 抽出来是因为两条口（自动化 / 人）只差「许可判定用哪一档」，装载与在途竞态重试必须只有一份实现：
+   * 复制一份就会出现「人这条路没有竞态重试」这种不对称缺陷。
+   * @param target 已过协议/回环判定的 URL
+   * @returns 装载落定后的快照
+   */
+  private async loadPage(target: URL): Promise<KernelPageSnapshotView> {
     // 地址栏是用户的第一入口：还没开过会话时自己把浏览器起起来，别让人先去「运行记录」点一下
     // （2026-11-23 用户实测：无会话时输 baidu 表现为「点了没反应」，其实是 NO_KERNEL_SESSION）。
     const contents = await this.ensurePage();
@@ -125,7 +136,7 @@ export class BrowserPageService extends Service {
       outcome = await settled;
     } catch (error) {
       if (!isNavigationLoadingRace(error)) throw error;
-      // 上一笔导航仍占着视图：先等它落定，再只重试一次目标导航。重试期间收到新的事件属于本次等待。
+      // 上一笔导航仍占着视图：先等它落定，再只重试一次目标导航。重试期间收到的新事件属于本次等待。
       const previousOutcome = await settled;
       this.ctx.logger.info(`检测到导航在途竞态，上一笔装载结局 ${previousOutcome}，目标地址只重试一次`);
       settled = settleLoad(contents, this.config.navigateTimeoutMs);
@@ -134,6 +145,20 @@ export class BrowserPageService extends Service {
     }
     this.ctx.logger.info(`内核视图已导航：${target.href}（装载 ${outcome}）`);
     return this.readSnapshot(contents);
+  }
+
+  /**
+   * 人给的地址（地址栏、会话面板、岗位卡那三处 UI）。
+   *
+   * 与 `navigate` 的唯一区别是**不做回环闸**：真实站点由人自己打开正是产品的正常用法。
+   * 「是不是人」不由调用方声明——`assertUserCall` 读网关打的标，主进程自动化路径调到这只口会当场被拒。
+   * @param url 目标地址（不可信输入，协议闸照旧）
+   * @returns 导航落定后的页面快照
+   * @throws `INVALID_ARGUMENT` 当前不是渲染层发起的调用
+   */
+  navigateFromUser = async (url: string): Promise<KernelPageSnapshotView> => {
+    assertUserCall('browser.page.navigateFromUser');
+    return await this.loadPage(resolveNavigableUrl(url));
   };
 
   /**

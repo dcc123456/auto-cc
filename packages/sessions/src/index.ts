@@ -22,6 +22,7 @@ import { app, session, type WebRequestFilter } from 'electron';
 import {
   AppError,
   asApp,
+  assertUserCall,
   isLoopbackHost,
   Service,
   agentTool,
@@ -272,12 +273,12 @@ export class SessionsService extends Service implements ConsentGate {
    * @param platform 平台标识，必须在 `cordis.yml` 的 `sessions.platforms` 里
    * @returns 挂载后的会话快照
    */
-  open = async (platform: string, source: 'user' | 'automation' = 'automation'): Promise<SessionsStatusView> => {
+  open = async (platform: string): Promise<SessionsStatusView> => {
     const config = this.platformOrThrow(platform);
-    // 会话挂载也是一条「自动化把真站装进视图」的路（2026-11-24 事故里两周接触点就是它）：
-    // 非回环 startUrl 只在**人**点的这条路上放行，其余一律 fail-closed，除非装配侧显式打开 allowRealAutomation。
+    // 会话挂载也是一条「自动化把真站装进视图」的路（2026-11-24 事故里两条接触点就是它）：
+    // 这只口永远按自动化判——来源不由参数决定（参数可伪造）。人点会话面板走 `openFromUser`。
     const startHost = new URL(config.startUrl).hostname;
-    if (source !== 'user' && !isLoopbackHost(startHost) && !this.allowRealAutomation) {
+    if (!isLoopbackHost(startHost) && !this.allowRealAutomation) {
       throw new AppError(
         'REAL_PLATFORM_AUTOMATION_BLOCKED',
         `自动化不把内核视图挂到非本机地址：${config.startUrl}（host ${startHost}）。` +
@@ -291,6 +292,26 @@ export class SessionsService extends Service implements ConsentGate {
     // 一个浏览器分区：平台只决定「打开哪个地址」，不再各开一份登录态（2026-11-22 裁定）。
     this.host.mountKernelSite(BROWSER_PARTITION, config.startUrl);
     this.ctx.logger.info(`内核视图已挂载会话：平台 ${config.id} · 分区 ${BROWSER_PARTITION} · ${config.startUrl}`);
+    return this.status();
+  };
+
+  /**
+   * 人在会话面板里点开的平台（spec 1.8-02 的人这条路）。
+   *
+   * 与 `open` 的唯一区别是不做回环闸：真实站点由人自己落在视图里正是产品的正常用法。
+   * 「是不是人」不由调用方声明——`assertUserCall` 读网关打的标，自动化路径调到这只口当场拒。
+   * @param platform 平台标识，必须在 `cordis.yml` 的 `sessions.platforms` 里
+   * @returns 挂载后的会话快照
+   * @throws `INVALID_ARGUMENT` 当前不是渲染层发起的调用
+   */
+  openFromUser = async (platform: string): Promise<SessionsStatusView> => {
+    assertUserCall('sessions.openFromUser');
+    const config = this.platformOrThrow(platform);
+    await this.mergeLegacyPartitions();
+    this.host.mountKernelSite(BROWSER_PARTITION, config.startUrl);
+    this.ctx.logger.info(
+      `内核视图已挂载会话（人点开）：平台 ${config.id} · 分区 ${BROWSER_PARTITION} · ${config.startUrl}`,
+    );
     return this.status();
   };
 

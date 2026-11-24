@@ -118,7 +118,7 @@ export function SessionPanel() {
     }));
 
   const open = (platform: string) =>
-    void run(actionLabel.open(platform), () => bridge?.sessions.open(platform, 'user'), {
+    void run(actionLabel.open(platform), () => bridge?.sessions.openFromUser(platform), {
       apply: setSnapshot,
     });
 
@@ -148,7 +148,7 @@ export function SessionPanel() {
 
   /** 导航成功后返回的就是落地页的快照，直接落进本面板，省掉一次「点了但看不见」的等待。 */
   const navigate = () =>
-    void run(actionLabel.navigate(), () => bridge?.browser['page.navigate'](urlDraft.trim(), 'user'), {
+    void run(actionLabel.navigate(), () => bridge?.browser['page.navigateFromUser'](urlDraft.trim()), {
       apply: setPage,
     });
 

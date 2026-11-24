@@ -4,7 +4,7 @@
  * 刻意不 import `electron`：入站校验、路径解析、序列化检查这三件事是安全边界，
  * 必须能在 Node 里直接测；electron 侧的接线（`ipcMain` / 事件广播）留在 index.ts。
  */
-import { AppError, type AppErrorPayload } from '@auto-cc/core';
+import { AppError, runAsUserCall, type AppErrorPayload } from '@auto-cc/core';
 import { isAllowedCall, type BridgeReply, type BridgeRequest } from '@auto-cc/shared';
 import { resolveCall } from './resolve.js';
 
@@ -65,7 +65,8 @@ export class Gateway {
       if (!target.ok) throw new AppError(target.code, target.message, path);
 
       const args = Array.isArray(request.args) ? request.args : [];
-      const value = await target.invoke(...args);
+      // 渲染层是这个网关唯一的入口：从这里进来的调用一律按「人发起」打标，主进程内部调用没有这个标。
+      const value = await runAsUserCall(async () => await target.invoke(...args));
       return { ok: true, value: assertSerializable(value, path) };
     } catch (error) {
       const payload = AppError.from(error, 'UNKNOWN');
