@@ -116,3 +116,21 @@ usage_ledger 1（未增） / delivery_records 0
 **已确认过的（本轮重复）**：`journey-auth-target-*` / `journey-auth-tailor-*` 各 11 个都在；未选文件点提交给 amber 可见原因；`deliver-submit` 只在表单展开后出现。
 
 **给开发的两个具体问题**：① 「母版」是怎么产生的——是某条我认为「只用于体验」的动作（如 `resume-card-generate`）才算，还是应该有「设为母版」入口？当前 UI 没有；② 「生成并使用样例 PDF」的前置是什么——我这轮的组合（`pack=fixture`、窗口可见、内核会话已开、`resume_docs=1`、母版 0）下它 60 秒无任何反馈，如果前置就是「必须有母版」，那它应该直接说「先设母版」，而不是静默。
+
+## 七、新包 `513bbeb2…`（157773597 B、asar 20:0x）复验：样例 PDF 兜底与切档重发都通了，授权格仍不通
+
+实例：`--remote-debugging-port=10460`、`--user-data-dir=/private/tmp/qa20-ud`、`settings.json` 只有 `pack=fixture`、窗口 `visible`。
+
+| 项 | 读数 | 结论 |
+| --- | --- | --- |
+| 样例 PDF 兜底（干净装机） | 点 `deliver-use-sample` → 「**PDF 已生成（1 页），本屏投递将使用它**」「**PDF 已选：resume-demo-classic.pdf**」，同时 `resume_docs 0→1`（自动补种 `resume-demo`） | **过**（上一包的 `RESUME_EXPORT_FAILED` 死格已消除） |
+| 只建议档拦截 + 就地切档 | 提交 → `档位 suggest：已备好 resume-demo-classic.pdf，未发送（切到半自动档或全自动档后再发）` + DOM 里 `deliver-switch-semi`「切到半自动档并重发」；此时 `attempts 0 / ledger 1(search) / deliveries 0` 零增 | **过（前端）** |
+| 切档后真发出并落账 | 点 `deliver-switch-semi` → `data-committed="true"`、回执「已发送 已把简历递给「resume-demo-classic.pdf」 等了 0 毫秒 · 页面回读：状态行回读到成功」；`attempts 0→1`（`succeeded`、`ledger_id=2`）、`usage_ledger 1→2`（新行 `deliver/1004`）、`delivery_records 0→1`、`job_status_events 2` | **过（端到端）** |
+| 投递后同帧（不点刷新） | 切到运行记录：「**账本 账本累计 2 次**」、无「一条记录都没有」；切到首页：「**投递成功 1 条**」 | **过** |
+| 授权格「勾选 → 定制 → 开跑」 | 勾选与 11 个 `journey-auth-tailor-*` 都在；点 `journey-auth-tailor-1004` 后**整组按钮 `aria-disabled=true`**（含 `journey-auth-grant`「授权并开跑」），卡片仍是「**定制 无 · 回执 无**」，页面提示「先在「岗位」页搜索并入…」 | **不过**（与萌新第 5 轮读数一致：定制显示成功后仍「定制 无」、开跑不可用） |
+| 窗口不可见闸（页面判据） | **未取到有效读数**：我用 `System Events` 隐藏后发起投递，实读 `document.visibilityState` 已回到 `visible`、`shell.getStatus().windowVisible=true`，调用挂在页面动作里（内核视图停在 `/deliver?...`），未形成「拒 + 零 attempt」的干净读数 | 未验证 |
+| ETA 秒数 / PDF 已用秒数 | **未取到**：本轮抓取 5 条完成太快，采样窗口内没有 `data-eta-seconds`/「约剩 N 秒」；样例 PDF 本轮**瞬时**生成（「PDF 已生成（1 页）」），`data-elapsed-seconds` 没蹲到 | 未验证（开发自报 12 秒与 0 秒两条，我未复现） |
+
+**结论**：六条里，样例 PDF 兜底、只建议拦截与就地切档、切档后真发出并落账、投递后同帧四条**过**；**授权格仍不过**（死路仍在，与萌新一致）；窗口闸与 ETA/秒数两条**未取到**。
+
+**给开发的具体问题（授权格）**：点「先定制这一岗」后按钮整组进入 `aria-disabled=true` 且不再恢复、卡片仍「定制 无 · 回执 无」——像是 tailor 请求既没成功也没失败地悬着（萌新读到「上一个动作还没结束」一直不消）。请给「定制中/失败原因/重试」三态中的明确一态，别让整组按钮永久禁用。
