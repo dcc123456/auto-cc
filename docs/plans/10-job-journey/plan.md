@@ -1454,7 +1454,7 @@ interface JourneyContext {
 
 **R13-10（红线事故，P0，2026-11-24 登记）：自动化访问真实招聘平台，且为 2026-11-21 同型事故复发。**
 
-**事实（不淡化）**：QA 在副本实例上跑 `jd.capture.run`，该副本 `platform-boss.pack` 回到默认 **`real`**（配置只在内存、新建实例回落到 `cordis.yml`）。`2026-11-24T05:44:48Z`（北京 13:44:48）内核视图导航 `https://www.zhipin.com/web/geek/jobs?query=前端&city=101020100` 并装载完成；`05:44:55Z` 批量抽取「容器 15 个 · 回传 12 行 · 帧 5/5」，`jd-capture-service` 入库 1 行；闸门放行并落账 `usage_ledger` 第 14 行 `action=search`（副本库，不在用户真实库）。更早 `05:30 / 05:31 / 05:33 / 05:37` 另有 4 次真实域名导航（`www.zhipin.com/`、`/job_detail/job-QA`、`/job_detail/job-QA2`）。
+**事实（不淡化）**：QA 在副本实例上跑 `jd.capture.run`，该副本 `platform-boss.pack` 回到默认 **`real`**（配置只在内存、新建实例回落到 `cordis.yml`）。`2026-11-24T05:44:48Z`（北京 13:44:48）内核视图导航 `https://www.zhipin.com/web/geek/jobs?query=前端&city=101020100` 并装载完成；`05:44:55Z` 批量抽取「容器 15 个 · 回传 12 行 · 帧 5/5」，`jd-capture-service` 入库 1 行；闸门放行并落账 `usage_ledger` 第 14 行 `action=search`（副本库，不在用户真实库）。**计数按「可归属」口径**（2026-11-24 修正，不多算也不少算）：**可归属本实例的 3 次**真站导航——`05:33:35.892 …job_detail/job-QA`、`05:37:42.445 …job_detail/job-QA2`、`05:44:48.646 …web/geek/jobs?query=前端&city=101020100`；加 1 次抓取（`05:44:55.701` 容器 15 / 回传 12 / 帧 5/5，`05:44:55.703` 入库 1 行）与 `usage_ledger` 第 14 行。**归属未定 2 条**：`05:30:47`、`05:31:22` 的 zhipin 行在共享日志（`~/Library/Logs/auto-cc/auto-cc.log` 多实例同写）里，疑为其它实例早期会话，**未计入本次事故、不删除**。
 
 **边界**：外发 0（无 `greet`/`deliver` 账行、`delivery_records` 空、attempt 仅 `unknown`/`in-flight`）；影响面仅副本库。
 
@@ -1465,6 +1465,9 @@ interface JourneyContext {
 **处置**：① QA 停手、污染副本 `/tmp/qa13-clean` 销毁、事故证据归档 `10.12-08-incident-real-site-access.txt`；② 开发加**产品级 fail-closed 闸**——自动化路径（`jd.capture.run`、批量抽取、执行器导航）发起前核对 `pack`，为 `real` 时一律拒绝并给 `REAL_PLATFORM_AUTOMATION_BLOCKED`（`details` 带 pack / 目标主机 / 动作），只有**人工在场的一次性显式授权**能解除；③ 所有取证脚本起手断言 `pack === 'fixture'` 且内核 host 是回环，否则中止——两道一起才算数；④ **闸门落地并取负对照前，`10.12-08` 的干净读数不取、第 13 片不收口**（spec 新增 10.12-10 挂该判据）。
 
 **责任人**：世界级开发程序员（产品闸）→ 刁钻的QA（负对照与干净读数）；PMO 复核事故证据。
+
+**实测补充（2026-11-24，共享日志的多实例归属）：`~/Library/Logs/auto-cc/auto-cc.log` 是多个实例同写的一本日志，没有实例标识就没法按行归属。**
+本轮事故里差点把两条别人的 zhipin 行（`05:30:47`、`05:31:22`）算到自己头上；反之也会漏掉自己写的行。**口径**：引用共享日志之前先找实例标识（name / pid / 分区），找得到就按标识筛，**找不得就标「归属未定」并单列**，既不算进自己的读数也不删掉；读数文件里要同时写「可归属 N 条」与「归属未定 M 条」，别只给一个总数。取证脚本若要写日志，优先用带实例标识的独立文件，不要只依赖共享日志。
 
 **R13-9（缺陷，P2，2026-11-24 登记，不阻塞第 13 片）：外发卡在页面等待时，`outbound_attempts` 停在 `in-flight` 且无人收尾。** 读数：QA 轮 1 新 attempt `id 8` 为 `status:'in-flight'`、`ledger_id:null`、run 仍 `running`（页面在等，尚未真发出）；用户叫停后这条 attempt **没有超时收尾**，会长期留在审计表里。危害：审计表出现永久性未终态行，「查不到回执的账行判对账异常」这条判据在它身上永远悬着，对账时会被当成异常笔。处置（二选一或并用）：① 给 `in-flight` 设超时——同一 attempt 超过 N 分钟无终态就置 `failed` 并写 `reason=TIMEOUT`；② 叫停/停止时把未终态的 attempt 一并收尾。排期：第 14 片带，不在本片阻塞；判据落地时另开 spec 条目。**与夹具缺口区分（2026-11-24）**：QA 两次 `job-QA`/`job-QA2` 停在 `in-flight` 是**仿站没有对应会话页**（无打招呼入口/发送键），属夹具缺口；R13-9 说的是**产品**在 in-flight 上缺少超时/叫停收尾。两件事分开登记、分开修。
 
