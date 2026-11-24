@@ -67,3 +67,19 @@ sqlite: SELECT id,status,reason,ledger_id FROM outbound_attempts ORDER BY id DES
 
 **这两条零增都不是缺陷**，也不是结构化卡的问题：同一张卡在轮 2 里三格都填对了、入参一次过 schema、待决单正常收掉。
 要拿到「各恰增 1」的干净读数，需要一个**从未发过的新目标**（下节）。
+
+---
+
+## 五、最终 HEAD 四门禁（独立复跑，`488a91b`）
+
+先修掉一处**我自己引入的** lexicon 违规：`docs/acceptance/10-job-journey/10.12-08-qa-structured-supply.txt:43`
+的「没有拖后腿」含 §4.6 禁用字，已改为「没有挡路」（只改措辞，含义不变）。改前 `LEXICON_EXIT=1`、改后 **0**。
+
+| 门禁 | 命令 | EXIT |
+| --- | --- | --- |
+| 类型 | `pnpm typecheck` | **0** |
+| 规范 | `pnpm lint`（含术语禁令、路由外发机检、工具契约） | **0** |
+| 格式 | `pnpm format:check` | **0** |
+| 测试 | `pnpm test` | **0**（**25 个包套件 / 2834 例全过，零失败**） |
+
+复跑环境：隔离树内容取自 `git archive 488a91b`（最终 HEAD），不依赖共享工作树。
