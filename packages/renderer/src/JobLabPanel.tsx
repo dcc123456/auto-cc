@@ -578,6 +578,19 @@ export function JobLabPanel() {
   };
 
   /**
+   * 这条岗位有没有「真实往来」：对方回过话，或追踪态已经过了 `captured`。
+   *
+   * 判据只用库里真有的两位（`jobs.replied` 与 `journey.tracking` 的 state），不猜「看起来投过」。
+   * @param row 库内这一行
+   * @returns 有往来时为 true（删除前要提示「记录会保留」）
+   */
+  const hasRecords = (row: JobRowView): boolean => {
+    if (row.replied) return true;
+    const state = trackingByJob.get(`${row.platform}|${row.jobId}`) ?? null;
+    return state !== null && ['tailored', 'greeted', 'replied', 'delivered', 'interviewed'].includes(state);
+  };
+
+  /**
    * 删除一条库内岗位（2026-11-24 用户裁定）。
    *
    * 只清「库内岗位 + 抓到的详情」（同一张 `jobs` 表），账本 / 投递记录 / 追踪 / 会话一律保留——
@@ -884,7 +897,7 @@ export function JobLabPanel() {
         <div className="mt-2 flex flex-col gap-2">
           {/* 第一行（2026-11-24 用户裁定：搜索条件不许一个字段占一行）：城市 + 关键词 + 条数同行。
               窄窗（@xl 以下）自动落成一列，不横向溢出。 */}
-          <div className="grid min-w-0 grid-cols-1 gap-2 @xl:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_6rem]">
+          <div className="grid min-w-0 grid-cols-1 gap-2 @xs:grid-cols-[minmax(0,10rem)_minmax(0,1fr)] @2xl:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_6rem]">
             {/* 城市（2026-11-23 裁定①）：知识包有 city 码表就换选择器（373 项 + 搜索），
                 打错城市会给 amber 提示，不再是「凭记忆手打、打错静默空结果」。
                 没有码表的装配（仿站那份包）保留手输框——那是唯一能用的形态，不硬造码。 */}
@@ -962,7 +975,7 @@ export function JobLabPanel() {
               这样界面不会长出「看起来能筛」的控件；传了站上不存在的取值由适配器结构化拒绝。 */}
           {searchFilters.length > 0 ? (
             <div
-              className="grid grid-cols-1 gap-2 @xl:grid-cols-2 @4xl:grid-cols-3"
+              className="grid grid-cols-1 gap-2 @xs:grid-cols-2 @2xl:grid-cols-3"
               data-testid="jd-search-filters"
               data-filter-count={searchFilters.length}
             >
@@ -1345,6 +1358,14 @@ export function JobLabPanel() {
                   </DeskButton>
                 ) : (
                   <>
+                    {/* 已投递/已沟通的岗位：**武装之前**先给一次提示（2026-11-24 第 12 轮裁定②）。
+                        判据用库里真有的两位：`jobs` 行的 `replied` 与 `journey.tracking` 的状态——
+                        这两样都说明「这条岗位有过真实往来」，删掉岗位不该让人以为记录也一起没了。 */}
+                    {hasRecords(selectedRow) ? (
+                      <span className="text-[11px] text-amber" data-testid="jd-remove-keeps">
+                        {t('jd.removeKeeps')}
+                      </span>
+                    ) : null}
                     {/* 删除（2026-11-24 裁定）：两步确认——第一下只武装、四秒内再按一下才删；
                         确认文案里写明「投递与沟通记录会保留」，因为账本/投递/追踪/会话一条都不动。 */}
                     <ArmButton

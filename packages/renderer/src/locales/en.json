@@ -765,7 +765,8 @@
       "removeHint": "Only the stored job and its captured details are removed; delivery, conversation and tracking records are kept",
       "removeAction": "Delete job",
       "removeDone": "Removed “{{title}}” from the library (ledger/delivery/tracking untouched)",
-      "removeGone": "That job is no longer in the library"
+      "removeGone": "That job is no longer in the library",
+      "removeKeeps": "This job already has delivery/conversation records: deleting only removes the stored job and its captured details; delivery, conversation and tracking records are kept"
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",
