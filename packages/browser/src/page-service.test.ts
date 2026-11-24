@@ -334,6 +334,15 @@ describe('agent 工具登记（spec 2.8-08）', () => {
     ]);
   });
 
+  it('工具面里只有自动化那只口：人那一路的 navigateFromUser 不登记给 agent', async () => {
+    // 这条把「自动化借不到 user 那条路」钉在工具面这一层：模型能调的只有 navigate（永远按自动化判），
+    // 而 navigateFromUser 既不在白名单工具里、调它还要网关标，两条一起断掉伪造来源的路。
+    const { tools } = await boot(null, {}, true);
+    const ids = (tools?.list() ?? []).map((tool) => tool.id);
+    expect(ids).toContain('browser.page.navigate');
+    expect(ids).not.toContain('browser.page.navigateFromUser');
+  });
+
   it('从工具路径传非 http(s) 协议仍被许可判定拦下，一次也没碰到内核', async () => {
     // 视图替身没有 `loadURL`：真走到内核那一步拿到的是 TypeError 而不是这个错误码，
     // 所以「码是 NAVIGATE_URL_REJECTED」这件事本身就证明了对话侧的字符串没能驱动内核。
