@@ -1,0 +1,69 @@
+# 任务级叫停按「让出」判=通过；批准链填参两次未对上（附两种形状的原文报错）
+
+构建 `89d28c2`、userData 副本 `/tmp/qa12-ud-del`、CDP 10410、`pack=fixture`。判据先按管理员定稿改：
+
+## 一、任务级「叫停」：按「让出」判定 —— 通过
+
+判据（2026-11-24 定稿）：`status === 'paused' && stop_reason === 'PAUSE_CANCELLED'`，离开 `running` ≤5 秒，账本三表零增，连跑三次。
+
+| 轮 | 点击 | 离开 `running` | 终态 | `stop_reason` | 账本 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `stop-run` 66×30 | **256ms** | `paused` | `PAUSE_CANCELLED` | 零增 |
+| 2 | 同上 | **256ms** | `paused` | `PAUSE_CANCELLED` | 零增 |
+| 3 | 同上 | **255ms** | `paused` | `PAUSE_CANCELLED` | 零增 |
+
+**3/3 通过**（时间 255–256ms、终态与动作一致、`usage_ledger 13 / outbound_attempts 7` 三次都没动）。
+「硬性终止」另算：无人值守执行器的「一键停用」已验过 `running → stopping → stopped`（68 秒、零外发），两者不混判。
+
+## 二、批准链：链路四步都通，但工具入参两种形状都被拒
+
+链路本身走得很完整（每步都有读数）：
+
+| 步 | 读数 |
+| --- | --- |
+| `/plan outbound.greet.perform {"jobId":2}` + 可见 `send` | 计划卡出现 |
+| 「确认并执行」(`confirm-run`) | `confirmed:true` |
+| 「批准」(`pause-approve` 57×24) | `approved:true` |
+| 补信息单出现（`agent-pause-supply` 文本框 + 「提交 / 放弃」） | `supplyAppeared:true` |
+| 填参 → 「提交」(`pause-supply`) | 「提交补充信息：成功」，进入下一轮 |
+
+**但两种 JSON 形状都被 zod 拒，工具一次都没执行，账本仍 `13 / 7 / 0`：**
+
+| 填的形状 | 原文报错 |
+| --- | --- |
+| `{platform,jobId,text}`（裸对象） | `request Invalid input: expected object, received undefined；- Unrecognized keys: "jobId","platform","text"` → 第 2 轮 |
+| `{"request":{platform,jobId,text}}` | `- Unrecognized keys: "jobId","platform","text"`（`request` 缺失不再报）→ 第 3 轮 |
+
+两次合起来看，**面板对提交值的处理不是「原样送进 input」也不是「塞进 request」**：裸对象那次把三个键当成了顶层未识别键、
+嵌套那次又把内层解开当顶层——两头的报错正好互补。所以「填什么才对」需要开发确认面板那条 unwrap 规则，
+我不再靠猜；继续猜下去只是在盲试。
+
+**契约本身是对的**（`packages/outbound/src/greet.ts:461`）：
+
+```ts
+input: z.strictObject({ request: z.strictObject({
+  platform: z.string().min(1), jobId: z.string().min(1).optional(),
+  conversationTarget: z.string().min(1).optional(), text: z.string().min(1) }) })
+```
+
+## 三、建议栏（管理员已让记，登记为 P2，不阻塞本片）
+
+**补信息卡让用户手填 JSON 是体验缺陷**：正确形态应当按工具 schema 生成结构化字段（`platform` 输入框、`jobId` 输入框、
+`text` 文本域），由界面按 schema 拼 input。现在这一格既难填（
+
+要懂 zod 形状）、又难判（两种形状都被拒），而且它正是「批准后恰一次」这条判据唯一走不通的一环。
+
+## 四、结论
+
+- **叫停（任务级）**：通过（255/256/256ms、`paused`/`PAUSE_CANCELLED`、零增、3/3）。
+- **批准后恰一次**：**仍无读数**——链路通、入参未对上、账本零增。需要开发给出补信息单的正确填法（或改成结构化字段）。
+- `data-pause-request-id` 未到，到位后复跑要先核该属性再点。
+
+## 复现命令
+
+```
+node tmp/qa13/assert-taskstop.mjs 10410 /tmp/qa12-ud-del 3   # 叫停：t0=点击，看 status/stop_reason
+node /private/tmp/qa-11/approve-chain.mjs                     # 批准链四步 + 补信息卡（裸对象形状）
+node cdp.mjs 10410 auto-cc /tmp/qa13-supply3.mjs              # 嵌套 request 形状
+sqlite: SELECT (SELECT COUNT(*) FROM usage_ledger),(SELECT COUNT(*) FROM outbound_attempts)
+```
