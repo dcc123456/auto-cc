@@ -265,3 +265,32 @@ data-cell=sends → 「投递成功 0 近 7 天成功笔数 · 最近一笔 02:0
 ```
 
 **结论**：桥返回 1、界面渲染 0，且 `useReloadWhenVisible` 之后仍 0，所以**不是区间/过滤 bug，是界面层**。补充定位：`data-cell=quota`（同一份 `funnelReply` 的 `quota.actions`）显示「1/10」是**对的**，说明该次的 `funnel.query` 回包本身没问题；坏在 `sends` 这一格（`deliverCount`）与趋势块漏斗那一排的取值/状态。请按 `HomePanel.tsx:334` 的 `levels.find(level==='deliver')` 与趋势块 `loadTrend` 的状态更新路径查一遍。
+
+## 十二、最终包 `08a7ac0c…`（157780629 B、asar `ba0a808a…`、HEAD `5c5e5013…`）终验：两格都过
+
+四行指纹我自己核的：`HEAD` = `origin/main` = `5c5e50137d7d51fe321f5bdfcdc80928a6d52e3f`；dmg `157780629 B` / `08a7ac0c28e621d1…`；asar `ba0a808ae775a0e6…`；`git status --porcelain` = 0。实例 `--remote-debugging-port=10491`、`--user-data-dir=/private/tmp/qa27-ud`、`settings.json` 只 `pack=fixture`、窗口 `visible`。
+
+### ① 反顺序 + `data-doc-id`：通过
+
+| 步骤 | 读数 |
+| --- | --- |
+| 空库先开主链面板 | 「母版 **0 份**」 |
+| 同屏抓 11 条 → 去简历页「使用虚构样例」→ 切回岗位页 | 「母版 **1 份**」、卡片「**母版 resume-demo** · 定制 无 · 回执 无」 |
+| 勾选 1004 →「先定制这一岗」 | `journey-auth-tailor-state`：`data-phase=done`、**`data-doc-id=resume-demo`**、`data-elapsed-seconds=0`、`data-error-code=""`；`journey-auth-grant` 的 `aria-disabled=null`（解锁） |
+| 「授权并开跑」 | `unattended.view` `status=done`、`completed=1`、`failed=0`；执行器「完成 1 岗 · 失败 0 · 待办 0」 |
+
+### ② 三处数字一致性：通过（脚本 `tmp/qa13/home-consistency.mjs` 一次跑出）
+
+| 口径 | 读数 |
+| --- | --- |
+| 库内账本 | `rows=3`、`search=1`、`greet=1`、`deliver=1`、`delivery_records=1` |
+| 原始 `funnel.query`（当天窗口，`todayStart=本地 00:00`） | `search=11, greet=1, reply=0, deliver=1, interview=0` |
+| 原始 `funnel.query`（7 天窗口） | `search=11, greet=1, reply=0, deliver=1, interview=0` |
+| 首页第一遍 | 「投递成功 **1** · 最近一笔 02:21:44 1004」；漏斗 `[11,1,0,1,0]`；`岗位进度 1`；`今日额度 1/10` |
+| 首页第二遍（切走切回） | 与第一遍 `uiStable=true` 完全一致 |
+| 运行记录看板 | 「账本累计 **3** 次」；`搜索 11 / 打招呼 1 / 投递成功 1` |
+| 判定 | `deliverOk=true`、`greetOk=true`、`docIdOk=true` |
+
+即：**原始 → 界面两遍 → 运行记录看板三处同数**，且 `data-doc-id` 读回 `resume-demo`。上一轮那条「首页 0 vs 原始 1」确由冻结的 `toMs` 造成，本包已消失。
+
+**结论（第 15 片 QA 侧）**：反顺序死路与三处数字两项都过；加上此前已签的样例 PDF 兜底、只建议拦截与就地切档、切档后真落账、投递后同帧、窗口闸页面层分支，QA 侧无遗留。本片可否放行以管理员裁定为准。
