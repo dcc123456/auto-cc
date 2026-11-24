@@ -1,0 +1,69 @@
+# 审批门禁修复复验（`89d28c2`）：D1 我判错了要撤、D2 通过（257ms × 3）、叫停归属要改
+
+环境：隔离树 `git archive 89d28c2` + esbuild 重打 `main.cjs` + `vite build`；userData 副本 `/tmp/qa12-ud-del`；
+CDP 10410；`agent-loop.planner` 读回 **`stub`**、`chat['session.setAutonomy']('semi')` 生效（`autonomy:"semi"`）；只打本机仿站。
+
+## 一、先撤我自己判错的那条（D1）
+
+**我上一轮报「一条 run 的卡上没有批准键」→ 现在按管理员要求查库定性，结论是：那不是确认单，是补信息单。**
+
+```sql
+SELECT request_id, kind, resolution FROM agent_pause_requests;
+```
+
+| run | `kind` | `resolution` |
+| --- | --- | --- |
+| `864f5215` / `da2ec288` | **`approval`** | `timed-out` |
+| `0b839707` | `approval` | `deny` |
+| `e293ce55` / `f18e5994` | **`elicitation`** + `approval` | `deny`/`approve` 组合 |
+| `9d65e0b0` / `cfff78c1` / `6603cd86` | **`elicitation`** | `timed-out` / `deny` |
+
+聚合：`approval` → approve 2 / deny 1 / timed-out 2；`elicitation` → deny 3 / supply 1 / timed-out 4。
+
+- 我观察到的「卡上只有放弃、没有批准」的那张，对应的是 **`kind="elicitation"`（补信息单）**——按设计它就没有批准键（缺的是参数，不是批准）。
+- **所以 D1「任何档位都没有批准出口」这条，按我拿到的证据不成立**，我撤回；确认单（`approval`）上三只控件是齐的（见下）。
+- 管理员裁决「确认单永远给可点批准」这条我照旧认同作为产品口径；只是**我那条缺陷读数站不住**。
+
+## 二、D2 复验：拒绝 **257ms** 落定，3/3 通过
+
+口径按管理员定稿：`t0 = 点下去那一刻`，250ms 轮询库里的 `agent_run`，只点 `[data-testid=agent-pause-band]` 里可见的那一只。
+
+| 轮 | 卡片类型 | 控件（可见数） | 点击 | 落定 | `stop_reason` | 账本 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `approval` | approve 1 / deny 1 / stop **0** | 「拒绝」56×24 | **257ms** | **`PAUSE_DENIED`** | 零增 |
+| 2 | `approval` | 同上 | 同上 | **258ms** | `PAUSE_DENIED` | 零增 |
+| 3 | `approval` | 同上 | 同上 | **257ms** | `PAUSE_DENIED` | 零增 |
+
+**3/3 在 5 秒内落定、`stop_reason` 与动作一致、账本三表零增** → **D2 通过**（修复前是 86s / 118s 或直接超时，现在 0.26 秒）。
+
+附一条：按钮上没有 `data-pause-request-id` 属性（我脚本里 `requestIdMatched:false` 就是这个原因），所以「按单号核对」这条暂做不到，
+本次是靠「在 `agent-pause-band` 内 + 可见」定位的——**建议开发给按钮补上该属性**，否则同一时刻多张单时仍可能点错。
+
+## 三、「叫停」不在审批卡上——我把它记成归属问题，不是缺陷
+
+三轮点 `stop-run` 全部 `not-in-band-visible`，卡的原文是：
+
+> 等人表态 1 张单在等你 · 批准与补充都由你按下：超时即不执行，闸门照旧 · **这一步要你先批准** · 发送打招呼 · 外发 · 第 1 步 outbound.greet.perform · 这一步是「outbound」级动作，要先由你批准（循环会为此开一张确认单…）
+
+即：**审批卡只给「批准 / 拒绝」**，「叫停」是**任务级**停止（在运行面板上），不是这张单上的动作。
+所以「叫停 5 秒内落定」这条判据的对象应当是**任务级 stop**，我上一轮在同一张卡上找 `stop-run` 是找错了对象。
+下次复跑改成：起 run → 点运行面板的 `stop-run` → 断言 `stopping/stopped` 且零增。
+
+## 四、D3（confirm 不阻塞）我这边有间接支持
+
+修复后 `/plan` → 计划卡**立即可见**（我脚本等 `confirm-run` 的第一轮 250ms 就命中），点确认后待决单随即出现（库里有 `request_id a8b7b835…`、`kind=approval`、`resolution=null`）。
+修复前同样的流程要等 60 秒以上才有返回。开发报的 8–10ms 与我这条现象一致。
+
+## 五、结论
+
+- **D2：通过**（257/258/257ms，3/3，`PAUSE_DENIED`，零增）。
+- **D1：我给出的缺陷读数不成立**（那是补信息单），撤回；确认单上批准键在。
+- **叫停**：判据对象改为任务级 stop，我上一轮找错了控件，下轮按新对象复跑。
+- 建议开发补 `data-pause-request-id` 到审批按钮上，方便按单号核对。
+
+## 复现命令
+
+```
+node tmp/qa13/assert-approval2.mjs 10410 /tmp/qa12-ud-del 3    # 每轮先清 running，再 /plan→确认→点可见控件
+sqlite: SELECT request_id,kind,resolution FROM agent_pause_requests ORDER BY requested_at DESC LIMIT 10
+```
