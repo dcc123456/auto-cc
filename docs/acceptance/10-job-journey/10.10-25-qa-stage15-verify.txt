@@ -188,3 +188,48 @@ ledgerRows [{"id":1,"action":"search","target_id":"前端","source":null}]
 所以本轮我所有「抓取/投递点了没反应」的读数（第十五节那些零记录）都落在这一条环境限制上，**不能算产品缺陷**；同一现象萌新在他的可见窗口实例上没有出现（他 17:27 那次投递成功、服务端回执 #6 与我核过的那条一致）。
 
 **结论**：③ 的判据在我这台机器上**无法由我在后台实例独立关闭**；可接受的替代证据是——① 萌新在可见窗口的同一构建上的首投（服务端 `/api/deliveries` 第 6 条：target 1004、64539 B、`sha256 38067ec9…`，我已独立核对）；② 若要 QA 自己再取一次，必须在用户在场、窗口被带到前台时跑，属 V 类取证条件，不能后台闷跑。
+
+## 十七、修复构建 `350cfd1` 上的三条末端读数（我在隐藏窗口实例上取到）
+
+构建：隔离树 `git archive 350cfd1` 重建的 `packages/main/dist/main.cjs`（产物内 `OUTBOUND_WINDOW_NOT_VISIBLE` 命中 1），实例 `--remote-debugging-port=10424`、`--user-data-dir=/private/tmp/qa15-hid-ud`、`pack=fixture`、仿站 10233 就绪。
+
+### ① 窗口不可见前置拒绝（`OUTBOUND_WINDOW_NOT_VISIBLE`）——已消除
+
+窗口用 `osascript … set visible … to false` 压成后台后实读 `document.visibilityState = "hidden"`、`hasFocus = false`，切半自动档再调 `outbound.deliver.perform`：
+
+```
+code:    OUTBOUND_WINDOW_NOT_VISIBLE
+message: 窗口不在前台（或站点视图没显示）：先把应用窗口带到前台再投递。这次一步都没发，也没有留下待核对记录
+details: { "windowVisible": false, "kernelViewVisible": false }
+```
+
+三表读数：`outbound_attempts 0 / usage_ledger 0 / delivery_records 0` → **零增**（与管理员判据「hidden 下结构化拒绝、零 attempt、零账本」一致）。
+
+### ② 只建议档不直发（P0 `10.10-04`）——已消除
+
+窗口**可见**、仿站会话已开、切 `suggest` 档，对一个未投过的目标 `1002` 调同一只口：
+
+```
+ok: true, committed: false
+reason: 档位 suggest：已备好 qa-sample.pdf，未发送（切到半自动档或全自动档后再发）
+```
+
+三表读数：`attempts 1 / ledger 1 / deliveries 1` → **零增**（这三行是下面③那笔，不是这次），仿站 `/api/deliveries` 仍 `count 4`。即「只建议」不再出现「说只建议、实际已外发」。
+
+### ③ 我自己的投递 +1 —— 已取到（但没用 UI 的样例 PDF）
+
+窗口 `visible`、仿站会话 `kernelViewVisible=true`、半自动档，调 `outbound.deliver.perform({platform:'boss', jobId:'1004', filePath:'/private/tmp/qa-11/qa-sample.pdf'})`：
+
+| 表 | 之前 | 之后 | 新行 |
+| --- | --- | --- | --- |
+| `outbound_attempts` | 0 | **1** | `id=1 · target_id=1004 · status=succeeded · ledger_id=1` |
+| `usage_ledger` | 0 | **1** | 与 attempt 的 `ledger_id=1` 对应 |
+| `delivery_records` | 0 | **1** | — |
+
+仿站对端：`/api/deliveries` `count 3 → 4`（新增这条）。
+
+**未覆盖的一点**：我用的是自备的最小 PDF（193 字节），不是界面「生成并使用样例 PDF」产出的文件，所以「PDF 带样例标识」这半条我**没验**；下一次要在窗口可见的实例上先抓岗位、再走界面「生成并使用样例 PDF → `deliver-submit`」补齐。
+
+### 另一条顺带读数
+
+同一 DB 再对 `1004` 发一次 → `OUTBOUND_ALREADY_SENT`「同一平台、目标、动作与简历版本已经成功外发，本次重放不再扣额或发送」，三表零增——四元组去重在修复构建上仍然生效。
