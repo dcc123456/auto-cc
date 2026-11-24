@@ -953,7 +953,12 @@
         "succeeded": "succeeded (no replay)",
         "unknown": "unknown (do not resend)",
         "failed": "confirmed absent"
-      }
+      },
+      "reconcileHeading": "Deliveries awaiting reconciliation",
+      "reconcileHint": "These attempts have no outcome and block re-delivering the same job. If the page shows nothing was sent, mark it not sent to unblock; nothing is resent and the ledger is untouched.",
+      "reconcileDismiss": "Confirm not sent",
+      "reconcileReason": "Manually confirmed: the page shows this attempt was not sent; marked void (ledger untouched, nothing resent)",
+      "reconcileDone": "Marked as not sent; you can deliver again now"
     },
     "resume": {
       "skill": {
@@ -2468,7 +2473,10 @@
         "blocked": "blocked by quota",
         "failed": "failed",
         "done": "done"
-      }
+      },
+      "actionTailor": "Tailor for this job",
+      "reasonNoMaster": "No master resume yet: import one or use the fictional sample first",
+      "reasonTailorNeedsSelect": "Tick this job first, then tailor it"
     }
   }
 }

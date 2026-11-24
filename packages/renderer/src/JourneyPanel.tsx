@@ -48,6 +48,12 @@ export function JourneyPanel() {
   const [scrollIntentPending, setScrollIntentPending] = useState(false);
   const intentRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState<JourneySearchView>();
+  /**
+   * 库内岗位（2026-11-24 N2）：授权候选不能只认 `journey.search` 的结果——
+   * 新手常用岗位页的「搜索并入库」抓岗，那条链不写 journey 的 search 读数，于是授权格永远是空列表。
+   * 这里直接读 `jd.store.list`，让抓来的岗位也能勾选、能定制、能开跑。
+   */
+  const [libraryJobs, setLibraryJobs] = useState<JourneyJobMatchView[]>([]);
   const [job, setJob] = useState<JourneyJobMatchView>();
   const [tailor, setTailor] = useState<JourneyTailorView>();
   const [interview, setInterview] = useState<JourneyInterviewView>();
@@ -156,6 +162,26 @@ export function JourneyPanel() {
    * 为选中岗位生成定制简历与招呼草稿；事实违规时服务整份失败。
    * @returns 无返回值
    */
+  /** 读库内岗位，拼成授权候选的形状（匹配计数是「没算过」，用 0 如实表示，不编数）。 */
+  useEffect(() => {
+    void (async () => {
+      const reply = await bridge?.jd['store.list'](50, {});
+      if (!reply?.ok) return;
+      setLibraryJobs(
+        reply.value.rows.map((row) => ({
+          jobId: row.jobId,
+          title: row.title,
+          company: row.company,
+          jdVersion: row.description === '' ? '' : `jd:${row.jobId}`,
+          matchedCount: 0,
+          partialCount: 0,
+          missingCount: 0,
+          requirements: [],
+        })),
+      );
+    })();
+  }, [bridge]);
+
   const loadTailor = () => {
     if (!job) return;
     void run(t('journeyMain.actionTailor'), () => bridge?.journey.tailor({ docId, jobId: job.jobId }), {
@@ -594,7 +620,7 @@ export function JourneyPanel() {
           masterVersion={tailor?.resumeVersion ?? intent?.resumeVersion ?? ''}
           tailoredVersion={tailor?.tailoredResumeVersion ?? ''}
           factCheckReceiptId={tailor?.factCheckReceiptId ?? ''}
-          jobs={search?.jobs ?? []}
+          jobs={search?.jobs.length ? search.jobs : libraryJobs}
         />
       </div>
     </DeskSection>

@@ -48,6 +48,24 @@ export function OutboundAuthorizationCard({
   const [dailyLimit, setDailyLimit] = useState('5');
   const [targets, setTargets] = useState<string[]>([]);
   const [runView, setRunView] = useState<UnattendedRunView | null>(null);
+  /**
+   * 在卡上直接定制出来的那一份（2026-11-24 裁定 N2）。
+   *
+   * 之前授权卡只认「本面板会话里刚跑过 journey.tailor」的版本，而新手是从岗位弹窗走简历生成链定制，
+   * 于是卡上永远「定制 无」、`JOURNEY_AUTH_NO_TAILOR` 恒现。这里允许人在卡上对**勾选的库内岗位**
+   * 直接触发 `journey.tailor`，定制完成后同一张卡即可开单。
+   */
+  const [localTailor, setLocalTailor] = useState<{ jobId: string; version: string; receipt: string } | null>(null);
+  /** 母版 doc id：优先取传入的版本串，其次现读库内第一份母版（卡上定制需要它）。 */
+  const [fallbackDocId, setFallbackDocId] = useState('');
+  useEffect(() => {
+    if (masterVersion !== '') return;
+    void (async () => {
+      const reply = await bridge?.resume['doc.list']();
+      if (!reply?.ok) return;
+      setFallbackDocId(reply.value.find((doc) => doc.parentDocId === null)?.id ?? '');
+    })();
+  }, [bridge, masterVersion]);
 
   /**
    * 重读授权单与停用位：动作之后一律重建读数，不自己猜主进程当下的状态。
@@ -90,14 +108,22 @@ export function OutboundAuthorizationCard({
     return () => window.clearInterval(timer);
   }, [runView?.status, reloadRun]);
 
-  const { busy, notice, noticeTone, run } = useBridgeAction(reload);
+  const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(reload);
+  const masterDocIdValue = masterVersion.startsWith('doc:')
+    ? (masterVersion.split(':')[1] ?? '')
+    : masterVersion || fallbackDocId;
+  /** 生效的定制版本：卡上刚定制的那一份优先（且必须仍被勾选），否则用传入的那一份。 */
+  const effectiveTailored =
+    localTailor !== null && targets.includes(localTailor.jobId) ? localTailor.version : tailoredVersion;
+  const effectiveReceipt =
+    localTailor !== null && targets.includes(localTailor.jobId) ? localTailor.receipt : factCheckReceiptId;
   const limit = Number(dailyLimit);
   const limitValid = Number.isInteger(limit) && limit >= 1 && limit <= 10;
   const canGrant =
     platform !== '' &&
-    masterVersion !== '' &&
-    tailoredVersion !== '' &&
-    factCheckReceiptId !== '' &&
+    masterDocIdValue !== '' &&
+    effectiveTailored !== '' &&
+    effectiveReceipt !== '' &&
     targets.length > 0 &&
     limitValid &&
     targets.length <= limit;
@@ -112,9 +138,9 @@ export function OutboundAuthorizationCard({
         platform,
         dailyLimit: limit,
         targets,
-        masterResumeVersion: masterVersion,
-        resumeVersion: tailoredVersion,
-        factCheckReceiptId,
+        masterResumeVersion: masterVersion !== '' ? masterVersion : `doc:${masterDocIdValue}`,
+        resumeVersion: effectiveTailored,
+        factCheckReceiptId: effectiveReceipt,
       }),
     );
 
@@ -161,7 +187,27 @@ export function OutboundAuthorizationCard({
       apply: (value) => setRunView(value),
     });
 
-  const reasonNoTailor = tailoredVersion === '' || factCheckReceiptId === '' ? 'JOURNEY_AUTH_NO_TAILOR' : undefined;
+  /**
+   * 对勾选的那一岗做一次定制（只在卡上跑，产物是版本串 + 事实校验回执）。
+   * @param jobId 要定制的岗位 id
+   * @returns 无返回值；失败时提示行给出原文
+   */
+  const tailorJob = (jobId: string): void => {
+    if (masterDocIdValue === '') {
+      setNotice(t('journeyAuth.reasonNoMaster'), 'amber');
+      return;
+    }
+    void run(t('journeyAuth.actionTailor'), () => bridge?.journey.tailor({ docId: masterDocIdValue, jobId }), {
+      apply: (view) => {
+        const version = view.tailoredResumeVersion;
+        const receipt = view.factCheckReceiptId;
+        if (version === null || receipt === null || receipt === '') return;
+        setLocalTailor({ jobId, version, receipt });
+      },
+    });
+  };
+
+  const reasonNoTailor = effectiveTailored === '' || effectiveReceipt === '' ? 'JOURNEY_AUTH_NO_TAILOR' : undefined;
   const grantReason =
     reasonNoTailor ??
     (targets.length === 0
@@ -420,7 +466,28 @@ export function OutboundAuthorizationCard({
                   checked ? [...current, match.jobId] : current.filter((target) => target !== match.jobId),
                 )
               }
-              label={t('journeyAuth.targetRow', { title: match.title, company: match.company })}
+              label={
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="min-w-0 flex-1">
+                    {t('journeyAuth.targetRow', { title: match.title, company: match.company })}
+                  </span>
+                  {/* 卡上直接定制（2026-11-24 N2）：勾了这一岗但还没有定制版本时，这颗键就是出口。 */}
+                  <DeskButton
+                    action={`journey-auth-tailor-${match.jobId}`}
+                    variant="ghost"
+                    compact
+                    busy={!!busy}
+                    disabled={!!busy || !targets.includes(match.jobId)}
+                    disabledReason={!targets.includes(match.jobId) ? 'JOURNEY_AUTH_NOT_SELECTED' : undefined}
+                    disabledReasonLabel={
+                      !targets.includes(match.jobId) ? t('journeyAuth.reasonTailorNeedsSelect') : undefined
+                    }
+                    onClick={() => tailorJob(match.jobId)}
+                  >
+                    {t('journeyAuth.actionTailor')}
+                  </DeskButton>
+                </span>
+              }
             />
           ))
         )}

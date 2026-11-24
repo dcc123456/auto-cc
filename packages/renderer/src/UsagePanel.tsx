@@ -44,6 +44,8 @@ export function UsagePanel() {
   const [summary, setSummary] = useState<UsageSummaryView>();
   const [outboundControl, setOutboundControl] = useState<OutboundControlView>();
   const [attempts, setAttempts] = useState<OutboundAttemptView[]>([]);
+  /** 未定局（`unknown` / `in-flight`）的尝试：它们会挡住同一四元组的再投，必须在对账区里看得见。 */
+  const unsettled = attempts.filter((attempt) => attempt.status === 'unknown' || attempt.status === 'in-flight');
   /** 本面板已发过的条数，只用来给 fixture 生成不重复的 targetId。 */
   const [sent, setSent] = useState(0);
   const bridge = window.autoCC;
@@ -229,6 +231,70 @@ export function UsagePanel() {
           );
         })}
       </ul>
+
+      {/* 未定局尝试的只读对账区（2026-11-24 裁定 N5）：`unknown`/`in-flight` 会挡住同一四元组的再投，
+          这里把那一行列出来并给一颗「确认没发出、本次作废」——只写审计原因，不改账本、不重发。 */}
+      {unsettled.length > 0 ? (
+        <section
+          className="mt-3 rounded-md border border-amber/40 bg-ink-900/40 px-2 py-2"
+          data-testid="usage-reconcile"
+        >
+          <h4 className="text-[11px] font-semibold text-amber">{t('usage.reconcileHeading')}</h4>
+          <p className="mt-0.5 text-[10.5px] text-slate-500">{t('usage.reconcileHint')}</p>
+          <ul className="mt-1 flex flex-col gap-1">
+            {unsettled.map((attempt) => {
+              const key = `${attempt.platform}:${attempt.targetId}:${attempt.action}:${attempt.resumeVersion}`;
+              return (
+                <li
+                  key={key}
+                  data-testid="usage-reconcile-row"
+                  data-attempt-key={key}
+                  data-attempt-status={attempt.status}
+                  className="flex flex-wrap items-center gap-2 rounded border border-line px-2 py-1 text-[11px] text-slate-300"
+                >
+                  <span className="min-w-0 flex-1 break-all">
+                    {t('usage.attemptRow', {
+                      action: attempt.action,
+                      target: attempt.targetId,
+                      version: attempt.resumeVersion,
+                      status: t(`usage.attemptStatus.${attempt.status}`),
+                      ledgerId: attempt.ledgerId ?? t('usage.none'),
+                      receiptId: attempt.receiptId ?? t('usage.none'),
+                    })}
+                  </span>
+                  <DeskButton
+                    action={`usage-dismiss-${attempt.action}-${attempt.targetId}`}
+                    variant="line"
+                    compact
+                    busy={!!busy}
+                    disabled={!!busy}
+                    disabledReason={busy ? 'ACTION_BUSY' : undefined}
+                    disabledReasonLabel={busy ? t('usage.reasonBusy') : undefined}
+                    onClick={() =>
+                      void run(
+                        t('usage.reconcileDismiss'),
+                        () =>
+                          bridge?.usage['ledger.dismissAttempt'](
+                            {
+                              platform: attempt.platform,
+                              targetId: attempt.targetId,
+                              action: attempt.action,
+                              resumeVersion: attempt.resumeVersion,
+                            },
+                            t('usage.reconcileReason'),
+                          ),
+                        { describe: () => t('usage.reconcileDone') },
+                      )
+                    }
+                  >
+                    {t('usage.reconcileDismiss')}
+                  </DeskButton>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       {attempts.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1" data-testid="outbound-attempts">

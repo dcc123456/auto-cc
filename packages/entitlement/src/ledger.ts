@@ -749,6 +749,33 @@ export class UsageLedgerService extends Service {
    * @param targetId 岗位/会话目标
    * @returns 两种动作各有至少一条 succeeded 尝试时为 true
    */
+  /**
+   * 人确认「这笔确实没发出去」之后，把那条未定局尝试按失败收掉。
+   *
+   * **只写尝试行与原因，绝不改账本、绝不重发**（2026-11-24 裁定）：它解除的是「同一四元组被挡住」这条阻塞，
+   * 不是替系统判断页面到底发没发。原因是人写的审计原话，原样落库。
+   * @param key 该尝试的幂等键（平台 / 目标 / 动作 / 简历版本）
+   * @param reason 人给的原因（空串按默认文案记）
+   * @returns 收掉之后的读数；那行已不是未定局时返回 null（不假装成功）
+   */
+  dismissAttempt = (key: OutboundAttemptKey, reason: string): OutboundAttemptView | null => {
+    const existing = this.attemptFor(key);
+    if (existing === null || (existing.status !== 'unknown' && existing.status !== 'in-flight')) return null;
+    this.store.db
+      .prepare(
+        `UPDATE outbound_attempts SET status = 'failed', reason = ?, updated_at = ? WHERE platform = ? AND target_id = ? AND action = ? AND COALESCE(resume_version, '') = COALESCE(?, '')`,
+      )
+      .run(
+        reason.trim() === '' ? '人工确认：这一笔没有发出，本次作废（未改账本、未重发）' : reason.trim(),
+        Date.now(),
+        key.platform,
+        key.targetId,
+        key.action,
+        key.resumeVersion ?? null,
+      );
+    return this.attemptFor(key);
+  };
+
   hasCompletedJob = (platform: string, targetId: string): boolean => {
     const row = this.store.db
       .prepare(

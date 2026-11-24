@@ -368,3 +368,19 @@ describe('usage.ledger 的读数（spec 1.9-07 / 1.9-08）', () => {
     expect(dayKey(midnight)).toBe(dayKey(midnight + 60 * 60 * 1000));
   });
 });
+
+describe('未定局尝试的人工作废（N5）', () => {
+  it('unknown 行被人工作废后落 failed 且留下原因，账本不动；已成功的行不许作废', async () => {
+    const { ledger } = await boot();
+    const key = { platform: 'boss', targetId: 'job-n5', action: 'deliver' as const, resumeVersion: 'v1' };
+    ledger.beginAttempt(key, null);
+    ledger.markAttemptUnknown(key, 'OUTBOUND_NOT_DELIVERED');
+    const before = ledger.summary().total;
+    const dismissed = ledger.dismissAttempt(key, '人工确认：页面回执显示没发出');
+    expect(dismissed).toMatchObject({ status: 'failed', reason: '人工确认：页面回执显示没发出' });
+    // 账本一行都没动：作废只写尝试行，不改账。
+    expect(ledger.summary().total).toBe(before);
+    // 已收掉的行不能再作废一次（返回 null，不假装成功）。
+    expect(ledger.dismissAttempt(key, 'again')).toBeNull();
+  });
+});

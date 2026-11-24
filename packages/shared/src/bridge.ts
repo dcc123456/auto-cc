@@ -266,6 +266,8 @@ export const RENDERER_ALLOWLIST = [
   'entitlement.gate.setOutboundStopped',
   'usage.ledger.summary',
   'usage.ledger.recentAttempts',
+  // 人确认「这笔确实没发出去」后把那条未定局 attempt 按失败收掉（只写审计原因，不改账本、不重发）。
+  'usage.ledger.dismissAttempt',
   // M2-B 求职主链：意向、按意向搜岗、定制草稿、面试材料。四只都只由人从界面或已审批的
   // agent 工具触发；`tailor` / `interview` 写的是本地变体与材料，不发任何东西出去。
   'journey.intent',
@@ -2962,6 +2964,16 @@ export interface BridgeSignatures {
   'usage.ledger.summary': { args: [recentLimit?: number]; returns: UsageSummaryView };
   /** 脱敏外发尝试：四元组、状态、页面回执与账本 id，不含正文和附件路径。 */
   'usage.ledger.recentAttempts': { args: [limit?: number]; returns: OutboundAttemptView[] };
+  /**
+   * 把一条 `unknown` / `in-flight` 的尝试按「人确认没发出去」收掉：解除后续投递被
+   * `OUTBOUND_RECONCILIATION_REQUIRED` 挡住的状态。**不动账本、不重发**。
+   * @param key 该尝试的四元组
+   * @param reason 人写的原因（空串按默认审计文案）
+   */
+  'usage.ledger.dismissAttempt': {
+    args: [key: OutboundAttemptKey, reason: string];
+    returns: OutboundAttemptView | null;
+  };
   /**
    * M2-B 的四只口（spec 10.3-01…03）：意向、搜岗、定制、面试材料。
    * `tailor` / `interview` 需要 `docId + jobId`，版本由主进程派生并原样回传；

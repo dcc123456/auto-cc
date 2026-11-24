@@ -953,7 +953,12 @@
         "succeeded": "已成功（禁止重放）",
         "unknown": "结局未知（禁止重发）",
         "failed": "已对账未发生"
-      }
+      },
+      "reconcileHeading": "待对账的外发尝试",
+      "reconcileHint": "这几笔没有定局，会挡住同一岗位的再次投递。核对页面后若确认没发出去，按一次「确认未发出」即可解除；不重发、不改账本。",
+      "reconcileDismiss": "确认未发出、本次作废",
+      "reconcileReason": "人工确认：页面回执显示这一笔没有发出，本次作废（不改账本、不重发）",
+      "reconcileDone": "已按「未发出」收掉这一笔，现在可以重新投递"
     },
     "resume": {
       "skill": {
@@ -2468,7 +2473,10 @@
         "blocked": "额度阻断",
         "failed": "失败",
         "done": "已完成"
-      }
+      },
+      "actionTailor": "先定制这一岗",
+      "reasonNoMaster": "还没有母版简历：先到简历页导入或使用虚构样例",
+      "reasonTailorNeedsSelect": "先勾选这一岗，再点「先定制这一岗」"
     }
   }
 }
