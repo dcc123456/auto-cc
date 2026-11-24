@@ -1,0 +1,37 @@
+# 10.12 在场一页纸：七条探针「我怎么取 / 取不到怎么记」
+
+> 依据：`10.12-qa-onsite-probe-plan.txt` 的 1–7 节。真站只由**用户本人**操作登录/验证码/最后确认那一笔；我只读、只取证。
+> 统一环境：当日 HEAD + 当日 dmg（记下 sha 前 16 位）；我自己的 CDP 端口号段；`pack=real`、窗口在前台可见。
+
+## 纪律（先钉死，违反即整轮作废）
+
+- **真站取证脚本禁止调用任何 `…FromUser` 口**（`browser.page.navigateFromUser`、`sessions.openFromUser`）。人那一路只能由用户本人在界面上点；CDP 里点了就等于冒充人，前两次事故就是这么来的。
+- 只读口白名单：`sessions.status()`、`browser.page.snapshot()`、`usage.ledger.summary()`、`usage.ledger.recentAttempts(20)`、`outbound.authorization.current()`、`journey.unattended.view()`、`shell.getStatus()`、`fleet/kernel` 类只读状态。**任何写动作都由人在界面上做。**
+- 停手三条：① 出现验证码/风控 → 停、存原文、不改 UA 不重试；② 四方对账任一笔对不上 → 停外发先对账；③ 出现授权范围外的外发 → 停并上报。
+
+## 七条探针
+
+| # | 条目 | 在场时我怎么取 | 判据 | 取不到怎么记 |
+| --- | --- | --- | --- | --- |
+| 1 | 登录三态 `10.11-02/06` | `sessions.status()` 每行取 `id/partition/auth/expiresAt/cookieNames.length`；Home 读 `home-blocker*` 数量、页首 `[data-action]` 文案与 `disabled`、`[data-testid=home-next]` 六条 | 三态只出现一种且与页面事实一致；已登录阻断条 0、主行动唯一可点；未登录阻断 ≥1 且指向登录；六条顺序固定、落点存在 | `auth` 与页面矛盾（页面已登录而 `auth=expired`）→ 记 `[!]` 并停，两边原文都贴 |
+| 2 | 前台焦点环 `10.11-13` | 用户按 Tab 到我指定控件；读 `document.activeElement`、`matches(':focus-visible')`、`outline-width/color`、`box-shadow`；拍一张裁剪图 | `:focus-visible` 为真且有可见环（`outline-width ≥ 1px` 或 `box-shadow` 非 none） | 窗口不在前台（`hasFocus=false`）→ 记 `[!]`「环境不满足，需前台」，**不判过**；不拿 hidden 态像素冒充 |
+| 3 | 200% 系统缩放 `10.11-23` | 用户把系统缩放调到 200%（或改显示器分辨率）；读 `devicePixelRatio`（应 2）、`kernelViewBounds`、内核页 `innerWidth/scrollWidth`；拍 100%/200%/收窄三张 | `devicePixelRatio≈2` 且无横向滚动、地址栏与视图不重叠 | 改不了系统设置 → 记 `[!]`「环境受阻」，只留 100% 那张，**不冒充 200%** |
+| 4 | `site-default` `10.11-25/26` | 只读三只口：`recentAttempts(20)`（四元组/status/ledger_id/receipt）、`summary()`（`today`/`byAction`/`recentDenials`）、`authorization.current()`（targets/status） | 未确认被拒（`recentDenials` 一条 + `today` 不变）→ 用户确认后同条再发 `today` **只 +1** → 同日再发同四元组被拒且**不增** | 用户不在场无法做「确认」这一步 → 前三步中只留「未确认被拒」这一条，另两步记 `[!]` 未验证 |
+| 5 | 优雅退出后 cookie `10.11-30` | 退出前读各分区 `cookieNames` 与 `<userData>/Partitions/*/Cookies` 的 `COUNT(*)`（**不导值**）；用托盘退出/`app.quit()`（不强杀）等进程退净；重启后同样两份 | 同一分区 cookie 行数不减少、`auth` 仍 `active`、分区目录未被迁走、`persist:web` 不出现 | 只能强杀 → 记为「非优雅退出，本项未验证」`[!]`，不拿强杀后清零当缺陷 |
+| 6 | 真实输入法组字 `10.11-32` | 我挂一次性 `compositionstart/end` 监听 + 每 200ms 采样城市搜索框 `value`、列表行数、「没有匹配」；用户用真实输入法打 `shanghai` 停 3 秒再上屏 | 组字期间行数不变、不出现「没有匹配」；上屏「上海」后列表变 1 条 | 用户不在场/无输入法 → 记 `[!]`「需真人输入法」，不拿程序化 setter 冒充 |
+| 7 | 1600 真档 `10.11-31` | `AUTO_CC_WINDOW_SIZE=1600x900` 起实例，读 `kernelViewBounds`、内核页 `innerWidth`、`scrollWidth/clientWidth`，拍一张 | `bounds.width === innerWidth`（差 0）、无横向滚动、地址栏/胶囊与视图交集 0 | 屏幕夹到 1512 → 记 `[!]`「环境受阻」，不冒充 1600 |
+
+## 取数顺序（一次会话内）
+
+1. 开场先记环境：HEAD、dmg/asar sha 前 16 位、`devicePixelRatio`、`shell.getStatus()`、`sessions.status()`（落第 1、3 条底数）。
+2. 用户登录 → 重读第 1 条（三态 + 阻断条 + 主行动）。
+3. 搜岗 ≥3 → 定制 → 授权 1 岗（用户点）→ 招呼+投递（用户点）→ **四方对账**（`10.12-onsite-4way-recon.txt`）。
+4. 期间穿插取第 2、6、7 条（都不产生外发）。
+5. 收尾做第 4 条的后两步与第 5 条（先记后退出、重启再读）。
+6. 每条证据落盘前跑：文本正则脱敏（手机号/邮箱/证件号）→ 截图逐张看 → 同批 `md5 -q | sort | uniq -c` 去重。
+
+## 记法约定（避免现场含糊）
+
+- `[x]` 只在**判据全部成立且有读数**时打；`[!]` 必须写清「哪一步没取到、为什么、是不是环境」；**禁止**把「没取到」写成「看起来没问题」。
+- 每条读数都带时间戳与当次 sha；跨轮对比只认同 sha。
+- 一旦触发停手三条中的任一条：先存原文与截图，再在群里报，**不在现场修任何东西**。
