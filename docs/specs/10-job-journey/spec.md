@@ -473,7 +473,12 @@
 > **2026-11-24 dated 注（读表口径：两种「没增」不要误读成缺陷）**：
 > ① **`outbound_attempts +1` 但 `usage_ledger` 不增 = 页面在等**——能力上还没真发出：attempt 停在 `in-flight`、`ledger_id` 为 null、run 仍 `running`；这不是成功，也不是失败，叫停后它可能长期留在审计表（缺陷登记见 plan §14.32.2 R13-9）。
 > ② **两者都零增 = 去重闸门拦下**——同一四元组 `platform|target|action|resumeVersion` 之前已成功过（QA 轮 2 的 `boss|job-B|greet|unversioned` 命中 attempt #7 / ledger 第 13 行），零增是**正确行为**，不是缺陷。
-> 所以判「批准链恰一次」必须用**从未发过的新目标**取读数；拿旧目标跑出零增不构成缺陷，也不构成通过。
+> ③ **`attempts +1` 且账本零增还要再分两种终态**（2026-11-24 补，QA 干净副本实测）：
+>
+> - **`in-flight`（过程态）**：`ledger_id` null、run 仍 `running`、`usage_denials` 不变——页面在等，**还没真发出**；长期不收尾即 R13-9。
+> - **`unknown` / `OUTBOUND_UNKNOWN_ERROR`（终态）**：`ledger_id` null、run `failed` / `STEP_UNSUCCESSFUL`、`usage_denials` 0（**不是闸门拒**，是执行层报未知）——按「结果不可判定就不记账」的 fail-safe 设计，账本不增是**设计行为**；但它同样**不是成功**，必须走「先对账、不盲目重发」（10.6-07）。
+>   对账时把 `unknown` 当成「还在跑」是误读；把它当成「失败了可以重发」更危险。
+>   所以判「批准链恰一次」必须用**从未发过的新目标**取读数；拿旧目标跑出零增不构成缺陷，也不构成通过；`unknown` 只算「待对账」，不算通过。
 
 > **附：桩的环境陷阱（不是缺陷）**——`planner` schema 缺省 `stub`，应用装配 `cordis.yml` 写成 `llm`；现场开法 `plugins.saveConfig('agent-loop', {planner:'stub'})`（内存层、重启即失）+ `chat.session.setAutonomy('semi')`（建议档不开确认单），桩只认**逐字点名的工具 id**；桥接口直调 `propose` 起的 run 上 `stop-run` 是空操作（`runIdRef` 只在界面路径赋值），取活体必须走界面 `/plan`。详见 plan §14.32.4。
 
