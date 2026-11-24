@@ -1,0 +1,63 @@
+# 任务级叫停（3 次）与「批准 → 补信息 → 恰一次」的现状（`89d28c2`）
+
+## 一、任务级「叫停」：时间与零增通过，终态是 `paused`（不是 `stopped`）
+
+对象按管理员改判：**任务级停止**（运行面板上那只 `stop-run`，不在审批卡里）。口径：`t0 = 点下去那一刻`，250ms 轮询库。
+
+| 轮 | 控件 | 点击 | 离开 `running` | 终态 | `stop_reason` | 账本 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `stop-run` 66×30「叫停」 | 成功 | **256ms** | **`paused`** | **`PAUSE_CANCELLED`** | 零增 |
+| 2 | 同上 | 成功 | **256ms** | `paused` | `PAUSE_CANCELLED` | 零增 |
+| 3 | 同上 | 成功 | **255ms** | `paused` | `PAUSE_CANCELLED` | 零增 |
+
+- **时间达标**：3/3 在 255–256ms 离开 `running`（判据 ≤5s）。
+- **账本零增**：`usage_ledger 13 / outbound_attempts 7` 三次都没动。
+- **但终态不是 `stopped`/`stopping`，而是 `paused` + `PAUSE_CANCELLED`**；再对同一条 run 调一次
+  `agent['loop.stop'](runId)`，返回仍是 `{status:"paused", stopReason:"PAUSE_CANCELLED"}`，**不会转 `stopped`**。
+
+**判读**：界面上那只「叫停」的语义是**让出并暂停**（可续跑），不是终止。审批卡原文也写着
+「确认单因这条任务让出而收掉（第 1 轮）：没人表过态，这一步没有执行」。所以判据要二选一：
+① 若承认「叫停 = 让出暂停」，判据改为 `status === 'paused' && stop_reason === 'PAUSE_CANCELLED'` 且 ≤5s、零增；
+② 若要求「彻底停止」，那现在**点不出 `stopped`**，是一条真缺陷。**这条要管理员裁一次**，我不自作主张按①判绿。
+
+## 二、批准 → 补信息 → 「恰一次」：链条能走，但我还没对上工具入参
+
+| 步骤 | 读数 |
+| --- | --- |
+| 审批卡 | `approve 1 / deny 1`（可见），点「批准」成功 |
+| 之后 | 出现**补信息单**：`agent-pause-supply` 文本框 + 「提交 / 放弃」，原文「**这一步还缺信息** … 入参不合法」 |
+| 提交第 1 次（`{"request":{platform,jobId,text}}`） | 收稿成功（「补充信息单已按你的表态收掉（第 1 轮）· 提交补充信息：成功」），但工具仍报 **`Unrecognized key: "jobId"`**，进入**第 2 轮补充** |
+| 账本 | `ledger 13 / attempts 7 / deliveries 0` —— **零增** |
+
+**工具契约我从源码读到了**（`packages/outbound/src/greet.ts:461`）：
+
+```ts
+input: z.strictObject({ request: z.strictObject({
+  platform: z.string().min(1),
+  jobId: z.string().min(1).optional(),
+  conversationTarget: z.string().min(1).optional(),
+  text: z.string().min(1),
+}) })
+```
+
+我填的形状与它一致，但补信息单把它当成「要补哪一格就填哪一格」在用（它把值往缺的那一格塞），
+所以**面板期望的不是整个 input，而是缺的那一格的值**。下一轮按「只填 `request` 对象本体」再试一次，
+不要把我这次的形状直接搬过去。
+
+**所以「批准后恰一次外发」这条仍无读数**：链条（批准 → 补信息 → 提交 → 继续问第 2 轮）是通的，但入参没对上，
+一步都没真执行，账本零增。
+
+## 三、结论
+
+- **叫停**：时间（255–256ms）与零增**达标**；终态 `paused`/`PAUSE_CANCELLED` 与判据字面「stopped」不符，**需裁定**。
+- **批准→恰一次**：链条通、账本零增，**入参形状待对齐**，这条仍空。
+- 审批卡上确实**没有** `stop-run`（只有批准/拒绝），与「叫停属任务级」一致。
+
+## 复现命令
+
+```
+node tmp/qa13/assert-taskstop.mjs 10410 /tmp/qa12-ud-del 3   # 任务级 stop，t0=点击
+node cdp.mjs 10410 auto-cc /tmp/qa13-approve1.mjs            # 批准 → 补信息卡 + 面板原文
+node cdp.mjs 10410 auto-cc /tmp/qa13-approve2.mjs            # 填参提交 → 第 2 轮
+sqlite: SELECT id,status,stop_reason FROM agent_run ORDER BY created_at DESC LIMIT 3
+```
