@@ -1,0 +1,77 @@
+# 10.12-12 审计测试独立复跑与第 13 片最终读数
+
+- 日期：2026-11-24
+- 复核人：刁钻的QA
+- 候选 HEAD：`31e6076`（`git merge-base --is-ancestor 31e6076 origin/main` = yes；`git rev-parse HEAD` 与远端同为此 hash）
+- 取树：`git archive 31e6076` 覆盖隔离树 `/private/tmp/qa-11/tree`（不在共享工作树上跑）
+- 约束：全程零真实网络；未调用任何 `…FromUser` 活体接口；未起真站页面
+
+## 一、三份测试文件独立复跑
+
+`pnpm exec vitest run packages/browser/src/page-service.test.ts packages/sessions/src/audit.test.ts packages/llm/src/llm.test.ts` → `THREE_FILES_EXIT=0`，**3 个文件 / 47 例全过**。
+
+审计判据逐条对照（用例原文）：
+
+| 判据 | 用例 | 结果 |
+| --- | --- | --- |
+| 非回环导航记且只记 1 条脱敏 INFO | `page-service.test.ts > 人那一路的审计（10.12-12） > 非回环导航记且只记一条脱敏 INFO，行为本身不被自动化闸拦` | 通过 |
+| 装载失败仍恰 1 条、不写成已导航成功 | 同文件 `> 后续装载失败也仍留一条请求审计，不写成已导航成功` | 通过 |
+| 回环不记 | 同文件 `> 回环导航不产生审计行` | 通过 |
+| 无网关标 `INVALID_ARGUMENT` | `page-service.test.ts > 导航许可 > 人给的地址那只口在没有网关标时结构化拒绝（主进程自动化路径借不到它）` | 通过 |
+| 非回环挂载记且只记 1 条、不被自动化闸拦 | `sessions/src/audit.test.ts > 人那一路的会话挂载审计（10.12-12） > 非回环挂载记且只记一条脱敏 INFO，挂载行为不被自动化闸拦` | 通过 |
+| 回环挂载不记 | 同文件 `> 回环挂载不产生审计行` | 通过 |
+| 挂载失败仍恰 1 条 | 同文件 `> 后续挂载失败也仍留一条请求审计，不写成已挂载成功` | 通过 |
+| 无网关标拒绝且不挂载不记 | 同文件 `> 主进程没有网关标时仍 INVALID_ARGUMENT，且不挂载也不记审计` | 通过 |
+| 冷启动两条回归 | `llm.test.ts > 冷启动：init 不许读表（源码级回归）…`、`冷启动：建表插件排在后面也不炸…` | 通过 |
+
+### 零真实网络的依据（读源码确认，不是只看用例名）
+
+- `sessions/src/audit.test.ts` 顶部 `vi.mock('electron', …)` 把 `session.fromPartition` 换成本地 cookie 替身（只读 `get/set`，无网络、无 cookie 文件）；`shell` 用 `FakeKernelHostService`，`mountKernelSite` 只记录地址不装载 URL；`ctx.logger.info` 用 `vi.spyOn(...).mockImplementation` 收成断言材料。文件头注释原文：「本文件不启动 Electron、不发起任何网络请求」。
+- `page-service.test.ts` 的审计用例用 `viewWithLoad(...)` 假视图，`did-finish-load` 由测试自己发；断言的 `urls` 是假视图收到的地址数组，不是真实请求。
+- 两份文件都不 import 真实网络客户端，也没有 `fetch`/`http` 调用。
+
+### 「同 host 多次可聚合」——补了一条临时探针实测（未入库）
+
+官方用例里没有「多次调用」那一条，所以我在隔离树里复制 `audit.test.ts` 成 `zz-qa-aggregate.test.ts`，追加「同一 host 连续两次人请求」用例后运行：
+
+```
+✓ 同一 host 连续两次人请求：各记一行且 host 一致，可按 host 聚合
+Test Files 1 passed / Tests 5 passed（PROBE_EXIT=0）
+```
+
+断言：审计行数 = 2、两行 `host=` 均为 `example.test`、两行都不含 `secret`（query 未落）。探针文件跑完即删，未进仓库。
+
+## 二、`f8e4060..31e6076` diff 复核
+
+| 类别 | 文件 | 结论 |
+| --- | --- | --- |
+| 产品代码 | `packages/browser/src/index.ts`、`packages/sessions/src/index.ts` | **只有 2 行日志措辞**（`人这一路…` → `人请求…`），判断分支、顺序、落点一字未改 |
+| 测试 | `page-service.test.ts`（+79）、`sessions/src/audit.test.ts`（新增 171） | 新增用例 |
+| 文档 | spec / plan / 三份证据 | 口径与读数 |
+
+结论：产品代码只改了审计文案，**不影响首启、批准链、自动化闸这三条活体路径**，故第八节的首启 22 只、批准链 `ledger id=1 / attempt id=1 succeeded / ledger_id=1` + 重放零增、以及 `pack=real` 两条自动化口 `REAL_PLATFORM_AUTOMATION_BLOCKED` 读数继续有效，不重跑活体。
+
+## 三、最终 HEAD 四门禁（隔离树独立复跑）
+
+| 门禁 | 退出码 |
+| --- | --- |
+| `pnpm typecheck` | `TYPECHECK_EXIT=0` |
+| `pnpm lint` | `LINT_EXIT=0` |
+| `pnpm format:check` | `FORMAT_EXIT=0` |
+| `pnpm test` | `TEST_EXIT=0` |
+
+汇总：**25 个包套件、185 个测试文件、2854 例全过、零失败**（`grep -cE "FAIL |failed [0-9]"` → 0）。
+
+## 四、第 13 片结论
+
+可放行。逐项对应 stage 13 的完成判据：
+
+| 判据 | 读数 | 证据位置 |
+| --- | --- | --- |
+| 越权外发 0 | 授权单过期/平台越权/未登记平台/超额度/重放五条负对照全部拦死，账本零增 | 本文件与 `10.12-08-qa-approval-chain-reading.txt` |
+| 超额度/停用/重放负对照全部拦截 | 停用 68 秒收口零外发、重放零增并被去重拒 | 同前 |
+| 助手动作在未登记来源上 fail-closed | `WRITE_ORIGIN_UNREGISTERED`（`10.12-07`） | 同前 |
+| 证据逐条复核、脱敏、md5 去重 | 21 张 10.12 PNG 逐张无个人数据；113 张全量 md5 零重复；文本正则 0 命中 | `10.12-qa-png-desensitization-review.txt` |
+| 最终 HEAD 四门禁独立复跑 EXIT=0 | `31e6076`：四个 0、2854 例 | 本文第三节 |
+
+遗留：无。下一片（打包冒烟与萌新复测）起实例前按 `10.12-11` 结论直接走首启路径即可。
