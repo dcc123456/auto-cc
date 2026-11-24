@@ -67,3 +67,21 @@ node /private/tmp/qa-11/approve-chain.mjs                     # 批准链四步 
 node cdp.mjs 10410 auto-cc /tmp/qa13-supply3.mjs              # 嵌套 request 形状
 sqlite: SELECT (SELECT COUNT(*) FROM usage_ledger),(SELECT COUNT(*) FROM outbound_attempts)
 ```
+
+---
+
+## 五、叫停按定稿判据复跑：**3/3 PASS**（`2026-11-24 13:17`）
+
+判据已按管理员定稿写进脚本（`tmp/qa13/assert-taskstop.mjs`）：`status === 'paused' && stop_reason === 'PAUSE_CANCELLED'`、离开 `running` ≤5s、账本三表零增。
+
+| 轮 | 控件 | 点击 | 离开 `running` | 终态 | `stop_reason` | 零增 | 判 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | `stop-run` 66×30「叫停」 | 成功 | **256ms** | `paused` | `PAUSE_CANCELLED` | 是 | **PASS** |
+| 2 | 同上 | 成功 | **256ms** | `paused` | `PAUSE_CANCELLED` | 是 | **PASS** |
+| 3 | 同上 | 成功 | **256ms** | `paused` | `PAUSE_CANCELLED` | 是 | **PASS** |
+
+`SUMMARY {"rounds":3,"pass":3,"fail":0}` —— **`10.12-08` 的「叫停」一条按「让出暂停」收口**。
+硬性终止仍归无人值守的「一键停用」（`10.12-06`，`running → stopping → stopped` 68 秒、零外发），两者分列。
+
+剩下唯一一条：**批准链「恰一次」**——等开发把补信息卡改成按 schema 的结构化字段（R13-8 已升 P1 前置），
+到位后按「填三格 → 继续 → 账本与 `attempts` 各恰增 1」复验；JSON 形状我不再试。
