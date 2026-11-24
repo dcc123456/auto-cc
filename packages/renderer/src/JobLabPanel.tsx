@@ -896,8 +896,11 @@ export function JobLabPanel() {
         )}
         <div className="mt-2 flex flex-col gap-2">
           {/* 第一行（2026-11-24 用户裁定：搜索条件不许一个字段占一行）：城市 + 关键词 + 条数同行。
-              窄窗（@xl 以下）自动落成一列，不横向溢出。 */}
-          <div className="grid min-w-0 grid-cols-1 gap-2 @xs:grid-cols-[minmax(0,10rem)_minmax(0,1fr)] @2xl:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_6rem]">
+              窄窗（@xl 以下）自动落成一列，不横向溢出。
+              关键词轨道封顶 36rem（2026-11-24 设计师 §12 P3）：不封顶时 1280/1600 下它会撑到 1006px、
+              被 `max-w-[36rem]` 裁在 576，条数孤悬在最右、中间空出 400+ px，看着像少了一个控件。
+              封顶后条数紧贴关键词右侧，余下行宽留在最右（整行左对齐收口）。 */}
+          <div className="grid min-w-0 grid-cols-1 gap-2 @xs:grid-cols-[minmax(0,10rem)_minmax(0,1fr)] @2xl:grid-cols-[minmax(0,14rem)_minmax(0,36rem)_6rem]">
             {/* 城市（2026-11-23 裁定①）：知识包有 city 码表就换选择器（373 项 + 搜索），
                 打错城市会给 amber 提示，不再是「凭记忆手打、打错静默空结果」。
                 没有码表的装配（仿站那份包）保留手输框——那是唯一能用的形态，不硬造码。 */}
@@ -963,6 +966,7 @@ export function JobLabPanel() {
                 value={limitDraft}
                 onValueChange={setLimitDraft}
                 placeholder={t('jd.limitPlaceholder')}
+                className="w-full"
               />
             </div>
           </div>

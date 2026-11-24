@@ -119,3 +119,65 @@ DOM 文本由「城市城市，如「上海」（可空）」变成 **「城市 
 
 **门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
 `pnpm test` → `TEST_EXIT=0`，**2832 例全过**。
+
+---
+
+## 第 14 轮：设计师 §12 三处收尾 + 主窗口最小尺寸 720×560
+
+PMO 指派（2026-11-24）：① footer 目标句文案「两个动作」改为「每个动作」；② en 条数占位被裁；
+③ 首行留白收口（条数紧贴关键词**或**整行左对齐，二选一）；④ 主窗口最小尺寸 720×560——299 那种整窗退化态
+从此不进产品，也不再为它优化。
+
+**④ 最小窗口**（`packages/shell/src/window-size.ts`、`index.ts`）
+- 新增 `MIN_WINDOW_SIZE = { width: 720, height: 560 }`，主窗口 `BrowserWindow` 挂 `minWidth/minHeight`；
+  打印用的隐藏窗口（`print-executor.ts`）不受影响。
+- `AUTO_CC_WINDOW_SIZE` 的语义改成「语法与最大边界」：**过小不再判非法**（那样会静默退回 1200×800），
+  而是由 `clampWindowSize()` 抬到最小尺寸并记一行 warn——请求 299 得到 720，日志里写得清为什么。
+- 活体：请求 `299x900` → `window.innerWidth 720`、`outerWidth 720`（**不是 1200**，也不是 299）；
+  请求 `720x560` → `innerWidth 720 / innerHeight 532`、`sw = cw = 720`、筛选网格 2 轨 5 行、块高 451、
+  条数已落到动作行（`jd-limit-compact`）。截图为 `10.12-01-min-window-720.png`。
+
+**③ 首行留白**（`JobLabPanel.tsx`，选「条数紧贴关键词」这一条，没有再做整行左对齐）
+- 关键词轨从 `minmax(0,1fr)` 封顶到 `minmax(0,36rem)`：不封顶时 1280/1600 下轨道撑到 1006px、框被
+  `max-w-[36rem]` 裁在 576，条数孤悬最右、中间空出 400+px。封顶后条数紧跟关键词，余下留在整行最右。
+- 顺带修掉一处**既有**越界（不是本轮引入）：条数输入框没有 `w-full`，136px 的输入框塞在 6rem（96px）格里，
+  900/1024 下伸出卡片右边 23px、被外层滚动容器切掉。改成 `w-full` 后 96 = 96，越界 0。
+
+| 视口 | 关键词框 | 关键词→条数空隙 | 条数框/格宽 | 越出格子 | 行右余量 | 横滚 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 900 | 434 | **8** | 96 / 96 | 0 | 1 | 无（sw=cw=900） |
+| 1024 | 558 | **8** | 96 / 96 | 0 | 1 | 无 |
+| 1280 | **576（封顶）** | **8** | 96 / 96 | 0 | 111 | 无 |
+| 1600 | **576（封顶）** | **8** | 96 / 96 | 0 | 431 | 无 |
+
+（8px 就是网格 `gap-2`；改前 1280/1600 的空隙是 ~430px。）
+
+**② en 条数占位**：`jd.limitPlaceholder` 改 `Target count`（量宽 66px，框内可用 118px，**不再被裁**；
+zh「本次目标条数」同为 66px、同样不裁）。
+
+**① footer 目标句**：zh「本行每个动作只作用于这一行：{{title}} · {{company}}」
+（改前是「下面**两个**动作…」，而 footer 现在有删除 + 打开 + 生成 + 打招呼 + 投递五只）；
+en「Every action here applies to this row only: …」。
+
+| 语言 | footer 高 | 目标文字宽 | 是否被裁 | 原文 |
+| --- | --- | --- | --- | --- |
+| zh | **55** | 402 | 否（scrollW 402） | 本行每个动作只作用于这一行：全栈工程师（Node + React） · 灯塔智能 |
+| en | **55** | 293 | **是**（scrollW 454） | Every action here applies to this row only: 全栈工程师… |
+
+**如实留一条已知限制**：en 下 footer 四只按钮更宽，留给目标句 293px，装不下「整句 + 中文岗位名）——
+岗位名被 `truncate` 截在「全栈工程师…」。这是**改前就有的形态**（旧文案「These two actions…」同样截断），
+本轮把整句从 51 字符收到 44 字符、截得少了一点，但没有消除。要彻底解决得把「说明」与「岗位身份」拆成
+两个 span（说明可截、身份不可截），那是 DOM 结构改动，等 PMO 定，不擅自做。
+
+**截图**（同批 md5 去重，7 张各 1 次）：
+`10.12-01-first-row-{900,1024,1280,1600}.png`（`b95f6ab6…` / `41d17a0c…` / `7e82f7f3…` / `dd876881…`）、
+`10.12-01-min-window-720.png`（`2ec3df51…`）、`10.12-01-footer-zh-1024.png`（`2d5732ce…`）、
+`10.12-01-footer-en-1024.png`（`30d48c17…`）。
+
+**门禁（本轮最终）**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；
+`pnpm format:check` → `FORMAT_EXIT=0`；`pnpm test` → `TEST_EXIT=0`、**2834 例**（+2：最小窗口两条用例）。
+
+**一条要报的坏消息**：四门禁首跑时 `packages/pdf-edit` 的
+`3.5-15 … 量到 monospace：嵌 Courier` 红了一次（`expected [] to include 'Courier'`）；
+单包复跑 **152/152 全过**、整仓再跑也是绿。它与本轮改动无关（没碰 `pdf-edit`），判为**既有偶发**，
+交给 QA 在独立回归里判是否登记。

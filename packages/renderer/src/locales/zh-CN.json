@@ -677,7 +677,7 @@
       "detailRequirementsHeading": "硬性要求（{{count}} 条）",
       "detailRequirementsEmpty": "库里这一行没解析出硬性要求",
       "detailSourceUrl": "来源 {{url}}",
-      "actionTarget": "下面两个动作只作用于这一行：{{title}} · {{company}}",
+      "actionTarget": "本行每个动作只作用于这一行：{{title}} · {{company}}",
       "salaryUnparsed": "未归一化",
       "salaryNegotiable": "面议",
       "salaryUnknown": "认不出数字",

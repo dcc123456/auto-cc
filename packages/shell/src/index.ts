@@ -22,7 +22,7 @@ import {
 import { z } from 'zod';
 import { isViewLive, liveWebContentsOf } from './view-liveness.js';
 import { recoveryVerdict, withRecovery } from './recovery-budget.js';
-import { DEFAULT_WINDOW_SIZE, parseWindowSize } from './window-size.js';
+import { clampWindowSize, DEFAULT_WINDOW_SIZE, MIN_WINDOW_SIZE, parseWindowSize } from './window-size.js';
 import {
   COMPANION_EDITOR_DEFAULT_BIN,
   launchCompanion,
@@ -579,10 +579,18 @@ export class ShellService extends Service {
         `AUTO_CC_WINDOW_SIZE 非法（${process.env.AUTO_CC_WINDOW_SIZE}），按默认 ${String(DEFAULT_WINDOW_SIZE.width)}×${String(DEFAULT_WINDOW_SIZE.height)} 起窗口`,
       );
     }
-    const size = requested ?? DEFAULT_WINDOW_SIZE;
+    const size = requested === null ? DEFAULT_WINDOW_SIZE : clampWindowSize(requested);
+    if (requested !== null && (size.width !== requested.width || size.height !== requested.height)) {
+      this.ctx.logger.warn(
+        `AUTO_CC_WINDOW_SIZE 请求 ${String(requested.width)}×${String(requested.height)} 低于最小窗口 ${String(MIN_WINDOW_SIZE.width)}×${String(MIN_WINDOW_SIZE.height)}，按最小窗口起`,
+      );
+    }
     const win = new BrowserWindow({
       width: size.width,
       height: size.height,
+      // 最小尺寸（2026-11-24 裁定）：比它更窄的整窗是退化态，不提供。
+      minWidth: MIN_WINDOW_SIZE.width,
+      minHeight: MIN_WINDOW_SIZE.height,
       show: false,
       title: 'auto-cc',
       webPreferences: {
