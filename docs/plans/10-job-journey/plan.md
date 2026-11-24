@@ -1452,6 +1452,8 @@ interface JourneyContext {
 
 **R13-7（风险，P2，2026-11-24 登记）：将来出现第二个调用方会踩 150 秒阻塞。** 主进程 `confirm` 仍会等到整条循环（含最长 150 秒暂停窗）才返回终态；现在只有渲染层一条调用方且已非阻塞。触发条件：新增任何 `await agent.loop.confirm(...)` 的调用方（新界面、助手第二入口、脚本化流程）。处置：新调用方一律 fire-and-forget + 读 `agent.pause.pending`/`agent/run-progress`；若要长期消除，再单独立项改契约并重写那 65 个用例，不在本片做。
 
+**R13-9（缺陷，P2，2026-11-24 登记，不阻塞第 13 片）：外发卡在页面等待时，`outbound_attempts` 停在 `in-flight` 且无人收尾。** 读数：QA 轮 1 新 attempt `id 8` 为 `status:'in-flight'`、`ledger_id:null`、run 仍 `running`（页面在等，尚未真发出）；用户叫停后这条 attempt **没有超时收尾**，会长期留在审计表里。危害：审计表出现永久性未终态行，「查不到回执的账行判对账异常」这条判据在它身上永远悬着，对账时会被当成异常笔。处置（二选一或并用）：① 给 `in-flight` 设超时——同一 attempt 超过 N 分钟无终态就置 `failed` 并写 `reason=TIMEOUT`；② 叫停/停止时把未终态的 attempt 一并收尾。排期：第 14 片带，不在本片阻塞；判据落地时另开 spec 条目。
+
 **R13-8（缺陷，P1，2026-11-24 登记、当日由 P2 升级）：补信息卡只给 JSON 文本框，人无法完成审批链。**
 
 **登记史（不删改）**：最初按**体验问题（P2）**登记、排第 14/15 片。同日 QA 用两种形状各试一次——`{request:{…}}` 与 `{platform,jobId,text}`——**都报** `Unrecognized key: "jobId"`。说明**没人能从界面上推断出正确形状**：这不是「难看」，而是**审批门禁在真实使用里的一条死路**（按钮在 ≠ 路可走）。故**升级 P1**，并作为 spec 10.12-08 的**前置**：**R13-8 未解则 10.12-08 不转绿。**
@@ -1462,7 +1464,9 @@ interface JourneyContext {
 
 **复验前置（2026-11-24，必写进证据，别让人以为同意记录天生就有）**：开发自测已通过 schema（原文「入参经人补充 1 轮，实际使用：`{"request":{"platform":"boss","jobId":"1","text":…}}`」，无 `Unrecognized key`），但随后落 `TOOL_FAILED：平台 boss 还没有一份自动化风险确认记录，先确认承担该风险`——**这是闸门在拦、形状已经对了**，零外发。所以 QA 复验前要在**副本实例**上做一次 `sessions.grantConsent('boss')`（只影响副本库），并在证据里注明这是**测试前置**。
 
-责任：世界级开发程序员（实现，已落）→ 刁钻的QA（用同一路径复验）。判据：`/plan outbound.greet.perform` → 确认 → 批准 → 填三格（platform 下拉选 boss / jobId / text）→ 提交 → `usage_ledger` 与 `outbound_attempts` 各恰增 1（deliver 再验 `delivery_records` 与 `ledger_id` 相同），全程只打本机仿站。
+**复验（QA，2026-11-24）：卡本身已通过，端到端待干净读数。** 工具声明的三格实渲染为 `agent-pause-supply-input-platform`（SELECT）/ `-jobId`（INPUT）/ `-text`（TEXTAREA）；填三格 → 提交 → 待决单 **1 → 0**、卡片收掉；面板原文「入参经人补充 1 轮，实际使用：`{"request":{"platform":"boss","jobId":"job-B","text":…}}`」——**一次过 schema、无 `Unrecognized key`，死路解除**（`10.12-08-qa-structured-supply.txt`）。剩「各恰增 1」：两轮都不是失败（轮 1 页面在等、轮 2 撞去重，见 R13-9 与下方读表口径），要换**从未发过的新目标**再取。
+
+责任：世界级开发程序员（实现，已落）→ 刁钻的QA（用新目标复验端到端）。判据：`/plan outbound.greet.perform` → 确认 → 批准 → 填三格（platform 下拉选 boss / jobId / text）→ 提交 → `usage_ledger` 与 `outbound_attempts` 各恰增 1 且新行 `status=succeeded`、`ledger_id` 指向新增那行（deliver 再验 `delivery_records` 与 `ledger_id` 相同）；同一条再跑一次必须零增（去重）。全程只打本机仿站。
 
 > **2026-11-24 dated 注（QA 自纠留档，结论以本条为准）**：QA 曾据单条 run 推「界面路径拒绝无效、桥接口有效」的通道差异假说，被 `agent_run` 全量数据推翻——拒绝并非无效，而是**常被忽略后靠超时收尾**，真正生效的两次也用了 86/118 秒。自纠原文保留在 `10.12-qa-approval-three-actions.txt` 的「更正上一节」，不抹掉。
 
