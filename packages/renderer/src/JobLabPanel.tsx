@@ -824,18 +824,37 @@ export function JobLabPanel() {
   const useSamplePdf = () => {
     setExportStartedAt(Date.now());
     setExportNow(Date.now());
-    void run(t('deliver.useSampleAction'), () => bridge?.resume['export.toPdf'](DEMO_RESUME_DOC_ID), {
-      apply: (receipt) => {
-        setExportStartedAt(undefined);
-        setBridgeError(undefined);
-        setResumePathDraft(receipt.path);
+    void run(
+      t('deliver.useSampleAction'),
+      () => {
+        if (!bridge) return undefined;
+        // 干净装机上还没有那份虚构样例：直接导会以 `RESUME_EXPORT_FAILED`「简历文档不存在」快速失败，
+        // 新手看到的是"点了没反应"（QA 在 clean `pack=fixture` 上就卡在这一格，2026-11-24）。
+        // 所以这颗键自带兜底：缺样例就先种一份（与简历页「用虚构样例」同一条口 `resume.export.seedDemo`），
+        // 再导出——不另开第二套样例，也不假造路径。
+        return (async (): Promise<BridgeReply<{ path: string; pages: number }>> => {
+          const exported = await bridge.resume['export.toPdf'](DEMO_RESUME_DOC_ID);
+          if (exported.ok) return exported;
+          // 失败最常见的原因是干净装机上还没有这份虚构样例（`RESUME_EXPORT_FAILED`：文档不存在）。
+          // 补种一次再导一遍；种不出来就把**第一次的原话**交回去，不吞掉真实原因。
+          const seeded = await bridge.resume['export.seedDemo']('base');
+          if (!seeded.ok) return exported;
+          return bridge.resume['export.toPdf'](DEMO_RESUME_DOC_ID);
+        })();
       },
-      describe: (receipt) => t('deliver.useSampleDone', { pages: receipt.pages }),
-      onError: (error) => {
-        setExportStartedAt(undefined);
-        setBridgeError(error);
+      {
+        apply: (receipt) => {
+          setExportStartedAt(undefined);
+          setBridgeError(undefined);
+          setResumePathDraft(receipt.path);
+        },
+        describe: (receipt) => t('deliver.useSampleDone', { pages: receipt.pages }),
+        onError: (error) => {
+          setExportStartedAt(undefined);
+          setBridgeError(error);
+        },
       },
-    });
+    );
   };
 
   /** 生成期间每秒刷新一次「已用」，结束（`exportStartedAt` 清空）即停表。 */

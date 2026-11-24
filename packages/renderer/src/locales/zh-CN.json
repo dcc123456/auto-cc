@@ -244,7 +244,7 @@
       },
       "deliver": {
         "here": "我在哪：第 5 步 · 投递",
-        "next": "下一步：选文件（或留空用设置里那一份）",
+        "next": "下一步：选一份简历文件（这一步必须在表单里选，不能留空）",
         "exit": "出口：回到上面挑岗位"
       },
       "auth": {
@@ -849,7 +849,7 @@
       "pickFile": "选择文件",
       "pickFileTitle": "选择要投递的简历 PDF",
       "pickFileFilter": "PDF 文件",
-      "pickFileNone": "还没选：留空就用设置里那一份",
+      "pickFileNone": "还没选简历文件：先点上面的「选择文件」，或用「生成并使用样例 PDF」备一份",
       "pickFileChosen": "已选：{{name}}",
       "rowButton": "投递简历",
       "action": "向「{{title}}」投递简历",

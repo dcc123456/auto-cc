@@ -142,3 +142,38 @@ Home「岗位进度 0」，与账本 1 笔自相矛盾。
 - 抓取「约剩 N 秒」与样例 PDF「已用 N 秒」两处**只验了实现与单测**：本轮探针抓 4 条、生成 1 页都太快，
   没在快照里抓到那两截文案；要补：抓 10+ 条时读 `data-eta-seconds`、生成期间读 `data-elapsed-seconds`。
 - 萌新同路径计时（≤10 分钟）与卡点数：本轮未重测，等 QA 在 `4122aebe…` 上验完再交萌新。
+
+八、补取的两条读数（2026-11-25 00:1x · 新包 dmg `513bbeb2…` / asar `1dd79fa6…`）
+------------------------------------------------------------------
+探针 `tmp/g2/suggest.ts`：干净 userData、`pack=fixture`、窗口可见、全程走界面点击（`.click()` 派发真事件）。
+①「只建议档 → 点切档 → 重发成功」端到端（**过**）：
+- 档位 `suggest`，表单里选目标 1012 + 已选 `resume-demo-classic.pdf` → 点 `deliver-submit`
+- 回执 `data-committed="false"`，原文「档位 suggest：已备好 resume-demo-classic.pdf，未发送（切到半自动档或全自动档后再发）」
+- `[data-action="deliver-switch-semi"]`「切到半自动并重发」在 DOM：true
+- 点它 → 2 秒后 `data-committed="true"`，回执原文「…回执 #24 · 目标 1012 · 附件 resume-demo-classic.pdf · sha256 28eb01b92540（服务端第 12 次收讫）」
+- `usage.ledger.summary` 最近：`["deliver:1012", "search:前端"]`；`journey.tracking.list` → `["1012=delivered"]`；attempts 1 条
+- 附带确认（不是缺陷）：`autonomy` 发货值是 `auto`（用户 2026-10-26 裁定「全自动，一次都不问」），
+  所以切到半自动后这一发**不弹确认卡**、直接发出：`approve=0 / pendingEmpty=true / committed=true`。
+  界面文案只承诺「切档后这一份会真发出去」，与实现一致。
+② 抓取「约剩 N 秒」真实快照（**过**）：
+`[data-testid="jd-progress-eta"]` 读到 `data-eta-seconds=12`，文本「 · 约剩 12 秒」，同帧摘要
+`stored=11 target=20`（抓 20 条上限、途中还读到过一次 `3` 秒）。页面内 50ms 采样器记录：
+`["12| · 约剩 12 秒"]`（`tmp/g2/suggest-readings.txt`）。
+③ 样例 PDF「已用 N 秒」快照（**过，但秒数停在 0**）：
+`[data-testid="deliver-sample-wait"]` 出现，文本「PDF 正在生成：已用 0 秒（首次通常 1–2 分钟）」，
+采样最大秒数 = 0 —— 本机这份 PDF 生成不到 1 秒（萌新那轮 2 分钟是他那台的状态），
+所以「秒数往上走」这一格在本机取不到；**能证明的是这一格确实在生成期间出现并带秒数字段**。
+
+九、同批修掉的两处（QA 在 `ba657b0` 上卡住的根因）
+------------------------------------------------
+1. **干净装机点「生成并使用样例 PDF」点不出文件**：这颗键只调 `resume.export.toPdf('resume-demo')`，
+   而 `resume-demo` 只有在「用虚构样例」（`resume.export.seedDemo`）跑过之后才存在。干净 userData 上
+   导出会**立刻**以 `RESUME_EXPORT_FAILED`「简历文档不存在」失败（顶部 seal 色错误横幅），
+   「已用 N 秒」那一格随之消失——QA 看到的「30 秒什么都没有」就是这一条（或点击没落页）。
+   修：这颗键自带兜底，缺样例先种一份再导（与简历页同一只口，不另开第二套样例）；种不出来时
+   把**第一次的原话**交回去，不吞原因。
+2. **两处文案互相矛盾**：表单提示写「还没选：留空就用设置里那一份」，而提交键的 amber 又要求必须选文件。
+   以 amber 为准（spec 10.10-18 要的就是「未选必须给可见原因」）：`deliver.pickFileNone` 改为
+   「还没选简历文件：先点上面的「选择文件」，或用「生成并使用样例 PDF」备一份」，
+   导览 `guide.deliver.next` 改为「下一步：选一份简历文件（这一步必须在表单里选，不能留空）」。
+   服务侧的配置兜底（`resumeFile`）继续只服务无人值守路径，不再对界面承诺。

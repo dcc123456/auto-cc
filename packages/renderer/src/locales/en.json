@@ -244,7 +244,7 @@
       },
       "deliver": {
         "here": "Where you are: step 5 · delivery",
-        "next": "Next: choose a file (or leave empty to use the one in settings)",
+        "next": "Next: pick a resume file (this step requires a file, it cannot be left empty)",
         "exit": "Exit: go back up and pick a job"
       },
       "auth": {
@@ -849,7 +849,7 @@
       "pickFile": "Choose a file",
       "pickFileTitle": "Choose the resume PDF to send",
       "pickFileFilter": "PDF files",
-      "pickFileNone": "Nothing chosen: leave empty to use the one in settings",
+      "pickFileNone": "No resume file chosen yet: use “Choose file” above, or “Generate and use sample PDF”",
       "pickFileChosen": "Chosen: {{name}}",
       "rowButton": "Deliver resume",
       "action": "Deliver resume to \"{{title}}\"",
