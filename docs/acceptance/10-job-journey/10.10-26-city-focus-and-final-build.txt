@@ -1,0 +1,33 @@
+城市选择器「点开即聚焦」修复与最终构建（2026-11-24，开发侧）
+
+**用户报**：岗位筛选的「城市」无法输入搜索。
+**QA 只读复现**：搜索框本身可聚焦（`search.focus()` 能成功）、过滤 373→1、选中回填都成立；
+缺的是「打开面板时自动聚焦」（打开后 `activeElement` 是 BODY），以及无匹配提示是中性灰而非 amber。
+
+**修法（只修聚焦这一步，判据不动）**
+- `DeskOptionPicker` 打开时用 `requestAnimationFrame` 把焦点放进搜索框；
+- 关闭（`-done` 与 `-back`）后**等一帧再回焦**到触发行：城市那一格是「面板 ↔ 输入框」二选一，
+  同步查 DOM 一定查不到，所以用 `returnFocusSelector`（`[data-action="jd-city"]` / `[data-action="jd-filter-<维度>"]`）+ rAF。
+- 「无匹配 amber」**不改样式**：amber 指的是**触发行上的当前值不在码表**（已实现），面板内无匹配用中性灰是对的（管理员裁定）。
+
+**活体读数（最终包，`pack=real`，只读不导航）**
+
+| 判据 | 读数 |
+| --- | --- |
+| 点开即聚焦 | `activeElement = jd-picker-city-search` |
+| 输入即过滤 | 候选 377 → **1**（仅 `jd-picker-city-杭州`） |
+| 选中回填 | 面板关闭，触发行文本 = **杭州** |
+| 关闭回焦 | `activeElement = jd-city` |
+| 手输路径（`pack=fixture`） | 触发行是 INPUT，可输入（QA 读数，本包未复测） |
+
+**最终产物（本片复测用）**：`pnpm dist:mac` → EXIT=0；
+`auto-cc-0.1.0-mac-arm64.dmg` **157779934** B / `51a6a365…`；
+`auto-cc-0.1.0-mac-arm64.zip` **155122379** B / `59b337d2…`；
+`app.asar` sha256 前缀 `782c39e8…`；可执行 `e0689170…`。
+真包冒烟（`--cdp-port 10440`）→ **EXIT=0**，六步全过。
+
+**七项整改**（只建议不直发、授权卡库内候选+卡上定制、投递写追踪、Home 可见即重读、
+未选文件/目标可见原因、投递写路径收进表单、`OUTBOUND_WINDOW_NOT_VISIBLE` 前置拒绝、
+运行记录页只读对账区）均已在本包内；活体读数由 QA 在干净实例复取。
+
+**门禁**：`TYPECHECK=0`、`LINT=0`、`FORMAT=0`、`TEST=0`，2859 例。

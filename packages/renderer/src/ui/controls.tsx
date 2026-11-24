@@ -1862,6 +1862,7 @@ export function DeskOptionPicker({
   doneText,
   backText,
   clearSearchText,
+  returnFocusSelector,
 }: {
   action: string;
   label: string;
@@ -1876,16 +1877,57 @@ export function DeskOptionPicker({
   backText: string;
   /** 搜不到时的出口文案（「清空搜索」）：与「清除」（清已选值）不是同一只控件。 */
   clearSearchText: string;
+  /**
+   * 关闭后把焦点还给谁（CSS 选择器）。
+   *
+   * 面板打开时触发行常被「替换」而不是并存（城市那一格就是这样），于是面板里找不到可回焦的兄弟节点。
+   * 调用方给一个选择器，关闭后按它回焦；给不出就退化成「找最近的带 data-action 的兄弟」。
+   */
+  returnFocusSelector?: string;
 }) {
   const [query, setQuery] = useState('');
   /** 组字中：输入法还没上屏时不过滤（否则列表会在打字中途被清空成「没有匹配」）。 */
   const [composing, setComposing] = useState(false);
+  /** 搜索框与长列表容器：打开即聚焦、关闭回焦两道动作都挂在这两个 ref 上。 */
+  const searchRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  /**
+   * 打开面板就把焦点放进搜索框（2026-11-24 用户报「城市无法输入搜索」）。
+   *
+   * QA 的读数：搜索框本身可聚焦、`search.focus()` 能成功，但打开时 `activeElement` 还是 BODY，
+   * 用户点开直接敲键盘字进不去。这里用 rAF 等面板真正挂上 DOM 再聚焦（同步 focus 会落在旧节点上）。
+   */
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  /**
+   * 关闭面板把焦点还给触发它的那一格（键盘用户不该被丢回 BODY）。
+   *
+   * 只有面板自己拿过焦点时才回焦：用户是用鼠标点开、焦点本来在别处时，抢走焦点更烦人。
+   */
+  const closeAndRestoreFocus = (): void => {
+    onClose();
+    // 关闭之后 React 才把触发行换回来（城市那一格是「面板 ↔ 输入框」二选一），同步查 DOM 一定查不到；
+    // 等一帧再回焦，键盘用户才不会被打回 BODY。
+    requestAnimationFrame(() => {
+      const explicit =
+        returnFocusSelector === undefined ? null : document.querySelector<HTMLElement>(returnFocusSelector);
+      const fallback = rootRef.current?.parentElement?.querySelector<HTMLElement>('[data-action]');
+      (explicit ?? fallback)?.focus?.();
+    });
+  };
   const needle = composing ? '' : query.trim().toLowerCase();
   const shown = needle === '' ? labels : labels.filter((entry) => entry.toLowerCase().includes(needle));
   return (
-    <div className="min-w-0 rounded-md border border-line-strong bg-ink-900" data-option-picker={action}>
+    <div ref={rootRef} className="min-w-0 rounded-md border border-line-strong bg-ink-900" data-option-picker={action}>
       <div className="flex min-w-0 items-center gap-2 border-b border-line px-2 py-1">
-        <button type="button" data-action={`${action}-back`} onClick={onClose} className={PICKER_LINK_CLASS}>
+        <button
+          type="button"
+          data-action={`${action}-back`}
+          onClick={closeAndRestoreFocus}
+          className={PICKER_LINK_CLASS}
+        >
           ← {backText}
         </button>
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-200">{label}</span>
@@ -1900,6 +1942,7 @@ export function DeskOptionPicker({
       </div>
       <div className="px-2 py-1">
         <input
+          ref={searchRef}
           data-action={`${action}-search`}
           value={query}
           placeholder={searchPlaceholder}
@@ -1946,7 +1989,12 @@ export function DeskOptionPicker({
         )}
       </div>
       <div className="flex justify-end border-t border-line px-2 py-1">
-        <button type="button" data-action={`${action}-done`} onClick={onClose} className={PICKER_DONE_CLASS}>
+        <button
+          type="button"
+          data-action={`${action}-done`}
+          onClick={closeAndRestoreFocus}
+          className={PICKER_DONE_CLASS}
+        >
           {doneText}
         </button>
       </div>

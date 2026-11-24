@@ -62,6 +62,16 @@ import { advanceViewTrail } from './viewTrail';
 /** 进度播报最多留几条：面板是验收入口，不是历史库（与定位实验台的自愈播报同一形状）。 */
 const PROGRESS_LIMIT = 4;
 
+/**
+ * 一行岗位在界面上的稳定键（平台 + 库内 id）。
+ *
+ * 放在模块级而不是组件内 const：`deliverTarget` 这类派生值在渲染期就要用它，
+ * 而组件内 `const` 定义在后面会撞 TDZ（本次真包白屏就是这条）。
+ * @param row 库内的一行
+ * @returns `<platform>-<id>`
+ */
+const rowKey = (row: JobRowView): string => `${row.platform}-${String(row.id)}`;
+
 /** 库内清单一次画多少行：默认 100 条，按 `filter-more` 每次再加 100（服务端上限 500）。 */
 const ROW_DISPLAY_LIMIT = 100;
 const ROW_PAGE_STEP = 100;
@@ -846,7 +856,6 @@ export function JobLabPanel() {
       ? 'NO_SEARCH_PLATFORM'
       : undefined;
   /** 一行的稳定标识：列表 key 与选中态共用这一处来源，不让两处各拼一遍。 */
-  const rowKey = (row: JobRowView): string => `${row.platform}-${String(row.id)}`;
 
   /** 此刻指向的那一行：从 `jobList` 现取；清单换过一批取不到时按"没选"处理，详情与动作段一起收起。 */
   const selectedRow = jobList?.rows.find((row) => rowKey(row) === selectedRowKey);
@@ -977,6 +986,7 @@ export function JobLabPanel() {
                   doneText={t('jd.picker.done')}
                   backText={t('jd.picker.back')}
                   clearSearchText={t('jd.picker.clearSearch')}
+                  returnFocusSelector='[data-action="jd-city"]'
                 />
               </div>
             ) : (
@@ -1097,6 +1107,7 @@ export function JobLabPanel() {
                           doneText={t('jd.picker.done')}
                           backText={t('jd.picker.back')}
                           clearSearchText={t('jd.picker.clearSearch')}
+                          returnFocusSelector={`[data-action="jd-filter-${filter.dimension}"]`}
                         />
                       </div>
                     );

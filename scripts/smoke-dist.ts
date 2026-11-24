@@ -397,7 +397,15 @@ async function main(): Promise<void> {
   // ⑤.5 岗位卡与弹窗：工作流刚抓到的库内岗位必须能在产物界面打开，不停在「库里有了、界面看不着」。
   await bridge.click({ selector: '[data-action="nav-jobs"]' });
   await waitForVisible(bridge, '[data-testid="job-lab"]');
-  await bridge.click({ selector: '[data-action="list"]' });
+  // 这一颗只需要「处理器跑起来把库内清单读出来」，不需要真实鼠标命中：助手面板/滚动位置都可能挡住它，
+  // 受信点击会以「未找到可点击元素」失败而看不出是遮挡。用页面内 click 触发 React 监听。
+  const listClicked = await bridge.evaluate<boolean>(`(() => {
+    const node = document.querySelector('[data-action="list"]');
+    if (!node) return false;
+    node.click();
+    return true;
+  })()`);
+  requireStep('冒烟 5/6 读库内清单键可点', listClicked, `[data-action="list"] 触发=${String(listClicked)}`);
   const cardVisible = await waitForVisible(bridge, '[data-testid="jd-cards"] [data-job-card]');
   requireStep('冒烟 5/6 本地仿站搜岗入库并出卡', cardVisible, `岗位卡可见=${String(cardVisible)}`);
   await bridge.click({ selector: '[data-testid="jd-cards"] [data-job-card]' });
