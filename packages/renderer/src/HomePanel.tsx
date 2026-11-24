@@ -283,14 +283,28 @@ export function HomePanel() {
   const [windowDays, setWindowDays] = useState<TrendWindow>(7);
   // 读数用的「此刻」只在**读的那一刻**取：写进渲染期会让 loader 身份每次渲染都变，
   // effect 跟着无限重跑（本轮实测直接打满渲染进程、CDP 都超时）。刷新时再推进一次。
+  /**
+   * 判定「现在」的基准时刻。
+   *
+   * **每次重读都要刷新它**（2026-11-24 QA/萌新 的首页全 0）：七个视图只改 display、不卸载，
+   * 旧写法用 `useRef(Date.now())` 只在挂载那一刻取一次，于是重读时 `toMs` 永远是应用启动时刻——
+   * 启动之后发生的 search/greet/deliver 全被切在区间外，数字卡与五级漏斗全 0，
+   * 而「最近一笔」走的是不带区间的账本读数，所以同一块里出现「0 笔 + 最近一笔 02:03」的自相矛盾。
+   */
   const nowRef = useRef(Date.now());
+  /** 取一次当下并把基准推前（读数与「距今多久」都用同一个时刻，避免同一屏内前后不一致）。 */
+  const stampNow = (): number => {
+    const now = Date.now();
+    nowRef.current = now;
+    return now;
+  };
 
   /**
    * 数字块：额度、追踪、投递成功数、最近一笔、授权数与执行器完成数，**一块读齐**。
    * 五个口任一失败 → 整块不可用（口径见 `HomeNumbers` 的注释；不是逐格降级）。
    */
   const loadNumbers = useCallback(async (): Promise<HomeNumbers> => {
-    const nowMs = nowRef.current;
+    const nowMs = stampNow();
     const todayStart = dayStartMs(nowMs);
     const [funnelReply, trackingReply, summaryReply, authReply, runReply] = await Promise.all([
       bridge?.funnel.query({ fromMs: todayStart, toMs: nowMs }),
@@ -342,7 +356,7 @@ export function HomePanel() {
 
   /** 趋势块：14 天柱 + 五级漏斗（区间合计）+ 最近 5 笔。 */
   const loadTrend = useCallback(async (): Promise<HomeTrend | { error: string }> => {
-    const nowMs = nowRef.current;
+    const nowMs = stampNow();
     // 柱图固定 14 天（10.11-05：14 天柱）；7/30 两档切的是漏斗与口径区间。
     // 14 天柱：起点取 13 天前，闭区间正好 14 个自然日（原先按 14 天算会多出一根 = 15 点）。
     const barRange = { fromMs: nowMs - 13 * 86_400_000, toMs: nowMs };

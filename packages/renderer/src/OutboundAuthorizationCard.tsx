@@ -306,6 +306,7 @@ export function OutboundAuthorizationCard({
             jobId,
             phase: 'failed',
             startedAt,
+            docId,
             errorCode: reply.error.code,
             errorText: reply.error.message,
           });
@@ -316,7 +317,7 @@ export function OutboundAuthorizationCard({
         const receipt = reply.value.factCheckReceiptId;
         if (version === null || receipt === null || receipt === '') {
           // 服务回了成功但没给定制版本/回执：这一份不能用来开授权，如实摆在卡上。
-          setTailorState({ jobId, phase: 'failed', startedAt, errorText: t('journeyAuth.tailorNoVersion') });
+          setTailorState({ jobId, phase: 'failed', startedAt, docId, errorText: t('journeyAuth.tailorNoVersion') });
           setNotice(t('journeyAuth.tailorFailedNotice'), 'seal');
           return;
         }
@@ -324,7 +325,7 @@ export function OutboundAuthorizationCard({
         // 而调用方传进来的 `platform` 来自「按意向搜岗」的读数——没搜过岗就是空串，
         // 空串会让「授权并开跑」永远禁用（2026-11-24 QA 的授权格死路第二半）。
         setLocalTailor({ jobId, platform: reply.value.platform, version, receipt });
-        setTailorState({ jobId, phase: 'done', startedAt });
+        setTailorState({ jobId, phase: 'done', startedAt, docId });
         setNotice(t('journeyAuth.tailorDoneNotice'), 'celadon');
         await reload();
       } catch (error) {
@@ -332,6 +333,7 @@ export function OutboundAuthorizationCard({
           jobId,
           phase: 'failed',
           startedAt,
+          docId,
           errorText: error instanceof Error ? error.message : String(error),
         });
         setNotice(t('journeyAuth.tailorFailedNotice'), 'seal');

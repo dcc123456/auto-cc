@@ -292,3 +292,28 @@ QA 的读数（先开求职主链、后种样例 → 点「先定制这一岗」
 门禁与产物：`TYPECHECK=0` / `LINT=0` / `FORMAT_CHECK=0` / `TEST=0`（**2871 例**）；
 dmg **157780677 B / `56512842179de0cf…`**、asar **`f3e635a890b965fe…`**；
 `smoke:dist` **六步全过**；`pnpm verify:window-gate` **8 条判据全 PASS**。
+
+十五、首页数字与 `data-doc-id` 收口（2026-11-25 02:1x · 候选包 dmg `08a7ac0c…` / asar `ba0a808a…`）
+----------------------------------------------------------------------------------------
+**① 首页「投递成功 0 / 漏斗全 0」的真根因：判定基准时刻被冻结。**
+`HomePanel.tsx` 旧写法是 `const nowRef = useRef(Date.now())`，只在**挂载**那一刻取一次；而七个视图只改
+`display`、不卸载，于是每次重读都拿**应用启动时刻**当 `toMs`——启动之后的 `search/greet/deliver`
+全被切在区间外。这同时解释了 QA 的三条旁证：直调 `funnel.query`（实时窗口）得到 `deliver=1`、
+界面两遍都是 0、同一份回包里的 `quota` 显示 1/10 却正确（它不吃这个区间）。
+修：两处 `const nowMs = nowRef.current` 改成 `stampNow()`——每次重读先取一次当下并推前基准，
+数字块与趋势漏斗共用同一个时刻。
+**② `data-doc-id` 在 `done` 态是空串**：`setTailorState({ jobId, phase: 'done', startedAt })` 漏带 `docId`。
+修：`running/failed/done` 三态都把实际递出的 doc id 带上。
+
+活体读数（干净 userData、`pack=fixture`、反顺序：先开面板 → 种样例 → 勾选 1003 → 定制 → 授权并开跑）：
+- `journey-auth-tailor-state`：`data-phase="done"`、**`data-doc-id="resume-demo"`**（不再是空串）
+- 执行器：`status=done`、`completed=[{"jobId":"1003","greetLedgerId":2,"deliverLedgerId":3}]`
+- 首页第一遍 / 切走切回第二遍**完全一致**：
+  `sends` = 「投递成功 **1** · 近 7 天成功笔数 · 最近一笔 02:12:53 1003」
+  五级漏斗 = `search=3 · greet=1 · reply=0 · **deliver=1** · interview=0`
+- 与库内对账：`usage_ledger` 三行 `search:前端 / greet:1003 / deliver:1003`、`delivery_records 1`、
+  `job_status_events` 1003 `captured→delivered` —— 三处同数。
+
+门禁与产物：`TYPECHECK=0` / `LINT=0` / `FORMAT_CHECK=0` / `TEST=0`（**2871 例**）；
+dmg **157780629 B / `08a7ac0c28e621d1…`**、asar **`ba0a808ae775a0e6…`**；
+`smoke:dist` **六步全过**；`pnpm verify:window-gate` **8 条判据全 PASS**。
