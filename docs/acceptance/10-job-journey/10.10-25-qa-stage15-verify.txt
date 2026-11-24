@@ -156,3 +156,21 @@ ledgerRows [{"id":1,"action":"search","target_id":"前端","source":null}]
 2. 我的实例上二次操作后也没出现 `OUTBOUND_RECONCILIATION_REQUIRED`，进一步说明这次根本不是 unknown 尝试，而是没提交。
 
 **结论不变**：QA 侧 `usage_ledger +1 / delivery_records +1` 这条仍未由我独立取到；需要按表单的正规路径（选目标岗位 → 附样例 PDF → 表单内提交）再跑一次，或直接采用萌新的服务端回执交叉印证（第 6 条，已核）。
+
+## 十五、③ 第二轮尝试（同一新包）：投递区控件穷举后仍无落账
+
+同一实例（`pack=fixture`、`jobs=5`、`docs=1`、`attempts=0`），把投递区控件**不按可见宽高过滤**全量列了一遍：
+
+| 控件 | 可见宽 | 说明 |
+| --- | --- | --- |
+| `deliver-1004`「投递简历」 | 81 | 卡片级按钮，点后无任何新记录 |
+| `deliver.form-toggle`「把简历递出去 0 份在等你点头」 | 314 | 展开投递表单 |
+| `deliver-pick-file`「选择文件」 | 62 | 文件面板入口 |
+| `deliver-use-sample`「生成并使用样例 PDF」 | 120 | 样例 PDF 入口 |
+| `deliver.how-toggle`「这一步到底怎么走？」 | 114 | 说明 |
+
+- **没有**独立的提交键（`deliver-submit` 之类一颗都没有），表单里也**没有**目标岗位的单选/复选（全页只有「只看已回复」一个 checkbox）。
+- 点 `deliver-1004` 前后：`outbound_attempts` 仍 0、`usage_ledger` 仍只有 1 行 `search`、`delivery_records` 仍 0，界面无提示。
+- 点 `deliver-use-sample` 后本轮也没读到「已选 …」的状态行（上一轮读到过）。
+
+**这轮不判缺陷、也不判通过**：我拿不到「附样例 PDF 后由哪颗按钮提交」的确切路径，只能如实记「卡片级『投递简历』点击后零记录、零提示」。它与萌新的 N6（未选文件点投递只滚视口）可能是同一处，建议开发核对一次「投递表单的提交口在哪里、卡片按钮在什么状态下才真提交」，我在下轮按确认后的路径复跑，判据不变（`usage_ledger +1`、`delivery_records +1`、PDF 带样例标识）。
