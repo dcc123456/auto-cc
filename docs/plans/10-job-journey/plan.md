@@ -1416,7 +1416,11 @@ interface JourneyContext {
 
 **D1 只对 `kind='approval'` 成立（判据口径，2026-11-24）**：先查 `SELECT kind, resolution FROM agent_pause_requests WHERE run_id='<run>'` ——`kind='elicitation'` 是**补充信息单**（缺的是参数不是批准），否决键是「放弃」，**本来就不该有批准键**，不得拿它判 D1；只有 `kind='approval'` 且卡上没有可见批准键，才判 D1，并把 `[data-testid="agent-pause-band"]` 的 outerHTML 交给开发复现。
 
-**修复与复验**：`89d28c2` 落「确认单永远给可点批准」，判绿仍待 QA 按新口径复跑（三只控件可见 + 6/6 在 5 秒内落定）。
+**D1 撤回（2026-11-24，留档不删结论）**：QA 按库定性后主动撤回「卡上没有批准键」——她看到的那张是 `kind='elicitation'`（补信息单，缺参数不是缺批准，按设计无批准键）。`agent_pause_requests` 实测：`864f5215`/`da2ec288` 为 `approval`+`timed-out`，`0b839707` 为 `approval`+`deny`，`9d65e0b0`/`cfff78c1`/`6603cd86` 为 `elicitation`+`timed-out`/`deny`，`e293ce55`/`f18e5994` 为两类单组合。**结论**：D1 按现有证据不成立（撤回记录见 `10.12-qa-approval-fix-verify.txt`）；PMO 同日承认「口径写窄了」，判据改为只对 `kind='approval'` 成立。
+
+**判据对象拆分（2026-11-24 定，QA 上一轮的 `stop>0` 断言是对象搞错、不是缺陷）**：**审批卡（`kind='approval'`）只断言「批准 / 拒绝」两键**且在 5 秒内落定；**「叫停」是任务级停止**（运行面板上的 stop），**不在审批卡上**，判据归任务级：点下去 5 秒内离开 `running`（`stopped` 或 `stopping`）、账本三表零增、连跑三次。
+
+**修复与复验**：`89d28c2` 落「确认单永远给可点批准」；复验状态见 R13-5。
 
 **R13-5（缺陷，P1，2026-11-24 登记，当日两次改写）：暂停决策的「忽略 + 慢」经核对主要来自量法与操作，修复是结构性兜底。**
 
@@ -1428,7 +1432,15 @@ interface JourneyContext {
 
 **开发侧修复（`89d28c2`）**：`loop.ts` 新增 `executeToSettlement()`，`confirm`/`resume` 都走它——执行中途抛错也落 `failed`、`scopes` 里已收的不重复收尾，**不留永远 `running` 的 run**；半自动档两次拒绝读数 **7ms / 4ms** 落 `failed` / `PAUSE_DENIED`，待决单归 0。
 
-**判绿条件（不放松）**：按上述两条口径，同档位连跑 **3 次拒绝 + 3 次叫停**，**6/6 在 5 秒内落定**，`stop_reason` 与动作一致（拒绝 → `PAUSE_DENIED`；叫停 → `stopped`/`stopping`），账本三表零增。责任：世界级开发程序员（已修）→ 刁钻的QA（按新口径复跑）。
+**当前状态（2026-11-24 夜，部分通过，不整条转绿）**：
+
+- **拒绝：3/3 通过**——按新口径（`t0`=点下去那一刻、250ms 轮询库）落定 **257 / 258 / 257ms**、`stop_reason='PAUSE_DENIED'`、账本三表零增；与修复前 86s/118s 或超时是数量级差别（`10.12-qa-approval-fix-verify.txt`）。
+- **叫停：待验（对象改任务级）**——QA 三轮点 `stop-run` 得 `not-in-band-visible`，因为审批卡上本来没有叫停（卡原文「这一步要你先批准」）；判据改为**运行面板上的任务级 stop**，5 秒内离开 `running`，连跑三次。
+- **批准链：待验**——`/plan` → 计划卡「确认并执行」→ `kind=approval` 单 → 批准 → 缺参数时在补信息卡填 `platform/jobId/text` → 提交 → 继续；预期 `usage_ledger` 与 `outbound_attempts` 各恰增 1（deliver 再验 `delivery_records` 恰增 1 且 `ledger_id` 相同）。
+
+**处置栏新增待办（2026-11-24，PMO 派给开发）**：确认单上的 `pause-approve` / `pause-deny` 与 band 容器补 `data-pause-request-id="<requestId>"`——现在按钮上没有这个属性，脚本和人都只能靠「哪只可见」猜，同一时刻多张单时仍会点错，这是 `APPROVAL_NOT_FOUND` 与「点了等于没点」的成因之一。补完后复跑改为「先核属性再点」。
+
+**判绿条件（不放松）**：拒绝 3/3 已过；剩下的任务级叫停 3/3 与批准链各一次，全部满足 5 秒落定（或恰增 1）且账本口径正确后，本条才转绿。
 
 **R13-6（缺陷，P1，2026-11-24 登记）：`agent.loop.confirm` 阻塞到暂停超时（120 秒）。** 现象：`confirm` 调用要等到 `pauseTimeoutMs` 到期才返回，渲染层在这两分钟里卡住。处置：`confirm` 立即返回（发起执行、把暂停态交给既有暂停读数），渲染层靠 `agent.pause.pending` 轮询拿状态，不靠一次调用的返回值。责任：世界级开发程序员；复跑：读 `confirm` 的返回耗时（应远小于暂停窗）+ 期间界面仍可交互。
 
