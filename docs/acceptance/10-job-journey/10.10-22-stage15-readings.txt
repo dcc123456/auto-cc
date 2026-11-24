@@ -58,3 +58,36 @@
 发布冒烟（`pnpm smoke:dist --exe dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc --cdp-port 10430`）→ **SMOKE_EXIT=0**，六步全过：
 产物与随包文件齐、首屏 Home、22 只工具、助手开合、fixture guard、回环内核、`boss-basic` 三节点 `done`、
 岗位卡与弹窗、关键链零插件错误、`Browser.close` 后自行退出 `code=0`。
+
+## 根因修复：Home 的「真实平台」改按登记处判（2026-11-24 追问后）
+
+**问题**：QA 在 `pack=fixture` 的干净实例上首屏仍出「先登录 BOSS 直聘」。
+**根因**：`HomePanel` 判「真实平台」用的是 `sessions.status().platforms[].startUrl`——那份来自
+`cordis.yml` 的静态平台清单，与 `platform-boss.pack` **无关**：切到 fixture 之后 boss 那行仍是
+`https://www.zhipin.com/`，于是登记处明明是回环，首屏却判出登录前置；点它还会走人那一路把真站挂进视图。
+**修法**：`loadNext` 增加 `platform.registry.list()` 读数，`isRealPlatform()` 按**登记处 origins** 判；
+`loginFirstApplies(rows, realIds)` 只在真实平台在场时才要求登录。纯仿站装配下登录前置不适用。
+**用例**：`HomePanel.blocker.test.ts` 现覆盖「登记处全回环不算真实平台」「无 origins 退回 startUrl」「有真实平台且未登录才要求登录」。
+
+**活体（新真包 + 全新 userData，`settings.json` 只预置 `{"platform-boss":{"pack":"fixture"}}`）**
+
+| 读点 | 读数 |
+| --- | --- |
+| `platform-boss.pack` | `fixture` |
+| 首屏主行动 | 「导入一份简历当母版」 · `data-step=resume` · 阻断条 `resume`（**没有登录步**） |
+| 简历三入口 | 粘贴/样例/生成 均在 |
+| 仿站搜岗 | 岗位卡 11 张 |
+| 首次外发 | 账本 1→2、投递记录 0→1、仿站对端 count=2 |
+
+`settings.json` 形状确认：`{"<插件id>":{<键>:<值>}}`（`packages/config/src/persist.ts` 的 `SettingsMap`），
+所以 `{"platform-boss":{"pack":"fixture"}}` 是正确写法，加载器在 `[Service.init]` 之前读入、作为一层与运行期合并。
+
+## 新构建指纹与冒烟（含本修复）
+
+| 产物 | bytes | SHA256 |
+| --- | ---: | --- |
+| `auto-cc-0.1.0-mac-arm64.dmg` | 157780911 | `128f025eceff61c874e91e08eaf05f6b057a3fff7c5f1a705560f2d31b004c4e` |
+| `auto-cc-0.1.0-mac-arm64.zip` | 155119700 | `8af51e6b5478abf393bdb5ea99e15733a87d10d22c344bae15cf9b636e07b1cb` |
+
+真包冒烟（`--cdp-port 10431`）→ **SMOKE_EXIT=0**，六步全过（22 只工具、助手开合、fixture guard、回环内核、
+`boss-basic` done、岗位卡与弹窗、干净退出）。
