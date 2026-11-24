@@ -199,9 +199,12 @@ export function JourneyPanel() {
   useEffect(() => {
     void readLibrary();
   }, [readLibrary]);
-  // 切回「岗位」工作台就重读一次：抓岗是在这一屏里发生的，回来后候选必须跟上（无轮询、无事件）。
+  // 切回「岗位」工作台就重读一次（无轮询、无事件）：候选岗位要跟上抓岗，**母版清单也要跟上**——
+  // 2026-11-24 QA 的反顺序读数就是后者：先开这一格、再去简历页种样例、切回来面板仍写「母版 0 份」，
+  // 于是定制拿着空 docId 直接失败。两条读的是两只口，必须一起重读。
   useReloadWhenVisible('jobs', () => {
     void readLibrary();
+    void read();
   });
 
   const loadTailor = () => {
@@ -638,9 +641,12 @@ export function JourneyPanel() {
           </div>
         )}
 
+        {/* 母版与面板**同源**（管理员 2026-11-24 裁定）：`docId` 就是上面 `read()` 从 `resume.doc.list`
+            读到的那一份。旧写法递的是 `tailor?.resumeVersion ?? intent?.resumeVersion`——意向/定制快照，
+            没生成过意向的人拿到空串，卡片就永远「母版 无」、定制递出空 docId（QA 那条顺序死路）。 */}
         <OutboundAuthorizationCard
           platform={tailor?.platform ?? search?.platform ?? ''}
-          masterVersion={tailor?.resumeVersion ?? intent?.resumeVersion ?? ''}
+          masterDocId={docId}
           tailoredVersion={tailor?.tailoredResumeVersion ?? ''}
           factCheckReceiptId={tailor?.factCheckReceiptId ?? ''}
           jobs={search?.jobs.length ? search.jobs : libraryJobs}

@@ -20,8 +20,12 @@ import { useBridgeAction } from './useBridgeAction';
 export interface OutboundAuthorizationCardProps {
   /** 本轮搜岗的平台标识；空串表示还没搜岗。 */
   platform: string;
-  /** 母版简历版本（`doc:<id>:<hash>`），来自意向或定制读数。 */
-  masterVersion: string;
+  /**
+   * 母版**文档 id**（就是简历库里 `parentDocId === null` 那一份），与求职主链面板同一次读数。
+   * 刻意不收「版本串」：那是意向/定制的快照，没生成过意向的人永远是空串，
+   * 卡片就会把「库里有母版」读成「母版 无」（2026-11-24 QA 的顺序死路）。
+   */
+  masterDocId: string;
   /** 定制简历版本；只有刚定制过的那一份才可用于开单。 */
   tailoredVersion: string;
   /** 那次定制的事实校验回执 id。 */
@@ -44,7 +48,7 @@ export interface OutboundAuthorizationCardProps {
  */
 export function OutboundAuthorizationCard({
   platform,
-  masterVersion,
+  masterDocId,
   tailoredVersion,
   factCheckReceiptId,
   jobs,
@@ -81,6 +85,8 @@ export function OutboundAuthorizationCard({
     jobId: string;
     phase: 'running' | 'failed' | 'done';
     startedAt: number;
+    /** 这一发**实际递出去**的母版 doc id（排障用：为空就说明解析没拿到库内母版）。 */
+    docId?: string;
     errorCode?: string;
     errorText?: string;
   } | null>(null);
@@ -98,19 +104,15 @@ export function OutboundAuthorizationCard({
    * @returns 可用的母版 doc id；库里确实没有母版时为空串
    */
   const resolveMasterDoc = useCallback(async (): Promise<string> => {
-    // **先读简历库**（管理员 2026-11-24 裁定①）：母版就是库里 `parentDocId === null` 的那一份。
-    // 旧写法优先取 `masterVersion`（那是意向/定制快照），没生成过意向的人在库里明明有母版，
-    // 这一格却读成空串，直接掉进「还没有母版简历」——顺序依赖的死路就从这里来的。
+    // 与面板同源的母版 id 优先（管理员 2026-11-24 裁定）；它为空的唯一原因就是库里还没有母版。
+    // 这里**不再回落意向/定制快照**：那条兜底正是「库里有母版、卡片却写母版 无」的后门。
+    if (masterDocId !== '') return masterDocId;
     const reply = await bridge?.resume['doc.list']();
-    if (reply?.ok) {
-      const master = reply.value.find((doc) => doc.parentDocId === null)?.id ?? '';
-      setFallbackDocId(master);
-      if (master !== '') return master;
-    }
-    // 库读不到（或确实没有母版）时才退回调用方给的版本串；两者都没有就是空串，由界面给原因与出口。
-    if (masterVersion.startsWith('doc:')) return masterVersion.split(':')[1] ?? '';
-    return masterVersion;
-  }, [bridge, masterVersion]);
+    if (!reply?.ok) return '';
+    const master = reply.value.find((doc) => doc.parentDocId === null)?.id ?? '';
+    setFallbackDocId(master);
+    return master;
+  }, [bridge, masterDocId]);
 
   useEffect(() => {
     void resolveMasterDoc();
@@ -167,9 +169,7 @@ export function OutboundAuthorizationCard({
   }, [runView?.status, reloadRun]);
 
   const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(reload);
-  const masterDocIdValue = masterVersion.startsWith('doc:')
-    ? (masterVersion.split(':')[1] ?? '')
-    : masterVersion || fallbackDocId;
+  const masterDocIdValue = masterDocId !== '' ? masterDocId : fallbackDocId;
   /** 生效的定制版本：卡上刚定制的那一份优先（且必须仍被勾选），否则用传入的那一份。 */
   const effectiveTailored =
     localTailor !== null && targets.includes(localTailor.jobId) ? localTailor.version : tailoredVersion;
@@ -207,7 +207,7 @@ export function OutboundAuthorizationCard({
             platform: effectivePlatform,
             dailyLimit: limit,
             targets,
-            masterResumeVersion: masterVersion !== '' ? masterVersion : `doc:${masterDocIdValue}`,
+            masterResumeVersion: `doc:${masterDocIdValue}`,
             resumeVersion: effectiveTailored,
             factCheckReceiptId: effectiveReceipt,
           });
@@ -239,9 +239,6 @@ export function OutboundAuthorizationCard({
    * @returns 无返回值
    */
   const revoke = () => void run(t('journeyAuth.actionRevoke'), () => bridge?.outbound['authorization.revoke']());
-
-  /** 从母版版本串里取 doc id（执行器要的是文档 id，不是版本串）。 */
-  const masterDocId = masterVersion.startsWith('doc:') ? (masterVersion.split(':')[1] ?? '') : masterVersion;
 
   /**
    * 开始一轮无人值守；执行器自己按授权单顺序跑，界面只轮询进度。
@@ -294,6 +291,9 @@ export function OutboundAuthorizationCard({
         setNotice(t('journeyAuth.reasonNoMaster'), 'amber');
         return;
       }
+      // 把实际递出去的 doc id 记在状态上，同时打在 `data-doc-id` 上：这一格为空就是解析失败，
+      // 有值而仍报 `KB_SOURCE_MISSING` 就是服务侧另有原因——两件事必须能当场分开（2026-11-24 的排障口径）。
+      setTailorState({ jobId, phase: 'running', startedAt, docId });
       /** 120 秒没回执就按失败收尾；底层调用即使后来回来了也不再改写这一格（人已经看到失败并可以重试）。 */
       let timer: number | undefined;
       const timeout = new Promise<never>((_, reject) => {
@@ -604,6 +604,7 @@ export function OutboundAuthorizationCard({
           data-phase={tailorState.phase}
           data-job-id={tailorState.jobId}
           data-elapsed-seconds={String(tailorElapsedSeconds)}
+          data-doc-id={tailorState.docId ?? ''}
           data-error-code={tailorState.errorCode ?? ''}
         >
           <p className="break-all text-[11px] text-slate-300">

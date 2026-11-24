@@ -265,3 +265,30 @@ QA 的读数（先开求职主链、后种样例 → 点「先定制这一岗」
 
 另：萌新的第二、三处数字（漏斗「投递成功」格空缺、首页「投递成功 0」却写「最近一笔 01:24:08」）
 本轮**没能复现**（需要跑一轮真正的无人值守投递），因此**未修、未验**，不判绿。
+
+十四、母版顺序死路收口 + 三处数字同源（2026-11-25 02:0x · 候选包 dmg `56512842…` / asar `f3e635a8…`）
+--------------------------------------------------------------------------------------------
+按管理员裁定改完三处：
+1. **母版同源**：`JourneyPanel` 传给卡片的从 `masterVersion={tailor?.resumeVersion ?? intent?.resumeVersion ?? ''}`
+   改成 `masterDocId={docId}`（同一个 `resume.doc.list` 读数）；卡片里那条「意向/定制快照兜底」
+   **整条删除**，`resolveMasterDoc()` 只在面板给的 id 为空时才现读库。
+2. **可见即重读补上母版**：`useReloadWhenVisible('jobs')` 原来只重读候选岗位，现在同时重读面板母版
+   （QA 的「母版 0 份」就是这一格：挂载时不重读，切回来还是旧读数）。
+3. **排障口**：`journey-auth-tailor-state` 增加 `data-doc-id`，直接把**实际递出去**的母版 id 摆在 DOM 上。
+
+活体读数（干净 userData、`pack=fixture`、**反顺序**：先开求职主链面板 → 去简历页点「用虚构样例」→
+切回岗位页 → 勾选 1003 → 点「先定制这一岗」→ 点「授权并开跑」）：
+- 三态采样：`running`「已用 0 秒」→ **`done`「定制完成：岗位 1003 · 版本 doc:resume-147af0985c92:911f143f36b5 · 回执 gen-83e4d419-…」**
+- 卡片：`母版 resume-demo · 定制 doc:resume-147af0985c92:… · 回执 gen-83e4d419-…`，`grantDisabled=null`（开跑键解锁）
+- 点「授权并开跑」：授权单 `status=active · targets=["1003"] · remaining=5`；
+  执行器 `status=running → done`，**`completed=[{"jobId":"1003","greetLedgerId":5,"deliverLedgerId":6}]`**、`failed=[]`、`pending=[]`
+- 两处数字（同一次投递后连读）：
+  **漏斗** `search=3 · greet=1 · reply=0 · deliver=1 · interview=0` ——「投递成功」这一格**有值 1**；
+  账本最近：`deliver:1003`（id 6，`workflowRunId=unattended-…`）与 `greet:1003`（id 5）；
+  执行器那行的「完成」= `completed.length` = 1，与账本/投递记录一致。
+- 结论：**「母版顺序死路」消除**；执行器「完成 0 岗」与漏斗「投递成功」空缺**在本轮同一次运行里都取到了正确值**
+  （前者是终态事件不重读视图、后者是同一份快照问题；两者都随「可见即重读 + 终态事件重读」收口）。
+
+门禁与产物：`TYPECHECK=0` / `LINT=0` / `FORMAT_CHECK=0` / `TEST=0`（**2871 例**）；
+dmg **157780677 B / `56512842179de0cf…`**、asar **`f3e635a890b965fe…`**；
+`smoke:dist` **六步全过**；`pnpm verify:window-gate` **8 条判据全 PASS**。
