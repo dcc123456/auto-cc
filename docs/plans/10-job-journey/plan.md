@@ -1452,6 +1452,18 @@ interface JourneyContext {
 
 **R13-7（风险，P2，2026-11-24 登记）：将来出现第二个调用方会踩 150 秒阻塞。** 主进程 `confirm` 仍会等到整条循环（含最长 150 秒暂停窗）才返回终态；现在只有渲染层一条调用方且已非阻塞。触发条件：新增任何 `await agent.loop.confirm(...)` 的调用方（新界面、助手第二入口、脚本化流程）。处置：新调用方一律 fire-and-forget + 读 `agent.pause.pending`/`agent/run-progress`；若要长期消除，再单独立项改契约并重写那 65 个用例，不在本片做。
 
+**R13-12（红线事故，P0，2026-11-24 登记，**当日第二起**）：取证脚本用 CDP 冒充「人自己点」，把内核挂到真站验证页。**
+
+**事实**：QA 为核「渲染层这一路确实是人」，在 `pack=real` 的闸门构建实例上从渲染层 eval 调 `sessions.openFromUser('boss')`——网关按设计把渲染层标成 user → 放行 → 内核视图挂载 `https://www.zhipin.com/web/passport/zp/verify.html?...`（登录/安全验证页）。
+
+**边界**：外发 0（三表全 0、`conversation_messages` 0）、无登录态（全新空 userData、无 cookie）、无抓取无入库；接触点 1 个。
+
+**定性**：**不是闸的缺陷**——自动化口两条（`sessions.open('boss')`、`browser.page.navigate(真实列表页)`）都被 `REAL_PLATFORM_AUTOMATION_BLOCKED` 拦住、账本零增；问题在**取证方法越界**：用 CDP 连渲染层等价于伪装成「人自己点」，而 `…FromUser` 本来就是给真人留的那一路。这与第一起（R13-10，默认值把自动化放到真站）成因不同：那是**产品缺闸**，这是**纪律缺硬边界**。
+
+**处置**：① 取证脚本**禁止调用任何 `…FromUser`**；人那一路只在最终真站片由真人操作，我们不代点、不 eval；② 开发补「人这一路碰真站」的 INFO 审计（`source=user`、host、时刻），作为对账/事故复查的唯一依据——判据落 spec 10.12-12。
+
+责任：刁钻的QA（已停手、已自报）→ 世界级开发程序员（审计）；PMO 复核事故证据。
+
 **R13-11（缺陷，P1，2026-11-24 登记）：全新空库首启时工具表只有 17 只，`outbound.greet.perform` 与 `journey.*` 全缺。**
 
 **现象**：干净 userData + 空库第一次启动，`agent.tools.list()` 为 **17 只**；`outbound.greet.perform`、`journey.*` 不在名单里。第二次启动回到 **22 只**。
@@ -1463,6 +1475,8 @@ interface JourneyContext {
 **修法（PMO 定，不接受只调顺序）**：`llm` 不要在 `init` 期读表，改**用时现问**（与项目既定教训同源：跨包能力用时按名字现问，不在本地存第二份事实）；并保证建表迁移在首次使用前必然已跑过。若仍选择调 `cordis.yml` 顺序，必须同时补「即使顺序被改坏也不炸」的兜底，否则换插件顺序又复发。
 
 **验收（必须有全新空库用例）**：首启后 `agent.tools.list()` = **22 只**且含 `outbound.greet.perform` 与 `journey.*`，`llm` 挂载状态非 `PENDING`；**口径：不能拿第二次启动的读数当首启通过**，证据里必须标明是第几次启动。
+
+**修复已进主线（`90d952f`）**：`llm` 的 `[Service.init]` 不再读表（就绪读数用时现问）、`providerRowOf()` 对 `no such table` 按回落处理、新增「空库上先挂 `llm.chat` 后挂建表插件」的用例；活体首启 22 只、`plugins.status().errorCount = 0`。**判绿仍以 QA 在全新空库首启复验为准**（不能拿第二次启动的读数当首启通过）。
 
 责任：世界级开发程序员（修）→ 刁钻的QA（全新空库复验）。判据落 spec 10.12-11。
 
