@@ -1438,11 +1438,11 @@ interface JourneyContext {
 
 - **拒绝：3/3 通过**——按新口径（`t0`=点下去那一刻、250ms 轮询库）落定 **257 / 258 / 257ms**、`stop_reason='PAUSE_DENIED'`、账本三表零增；与修复前 86s/118s 或超时是数量级差别（`10.12-qa-approval-fix-verify.txt`）。
 - **任务级叫停：3/3 通过（判据按「让出暂停」）**——运行面板上的 `stop-run`（66×30「叫停」）点下去 **256 / 256 / 255ms** 离开 `running`，终态 `status='paused'`、`stop_reason='PAUSE_CANCELLED'`，账本 `13 / 7` 三次零增（`10.12-qa-taskstop-and-approve.txt`）。**语义裁定（2026-11-24，PMO）**：这只键是「**让出**」不是「终止」——点后停在 `paused`、用户仍可继续或拒绝；再调一次 `loop.stop` 也不转 `stopped`，这是设计而不是缺陷。**硬性终止**是另一条：无人值守执行器的「一键停用」`running → stopping → stopped`（68 秒落定、全程零外发，spec 10.12-06），两者**分列、不混判**。
-- **批准链：待验（入参形状已对齐）**——`/plan` → 计划卡「确认并执行」→ `kind=approval` 单 → 批准 → 补信息卡填 **缺的那一格的值**：`{platform, jobId, text}` **本体**，不要再外包一层 `request`（QA 那次 `Unrecognized key: "jobId"` 就是外包导致 `request` 里又出现 `request`）→ 提交 → 继续；预期 `usage_ledger` 与 `outbound_attempts` 各恰增 1（deliver 再验 `delivery_records` 恰增 1 且 `ledger_id` 相同）。
+- **批准链：待验（入参形状已对齐）**——`/plan` → 计划卡「确认并执行」→ `kind=approval` 单 → 批准 → 补信息卡填 **缺的那一格的值**：`{platform, jobId, text}` **本体**，不要再外包一层 `request`（QA 那次 `Unrecognized key: "jobId"` 就是外包导致 `request` 里又出现 `request`）→ 提交 → 继续；预期 `usage_ledger` 与 `outbound_attempts` 各恰增 1（deliver 再验 `delivery_records` 恰增 1 且 `ledger_id` 相同）。**当前卡在入参形状上**：QA 两种形状都被 `Unrecognized key: "jobId"` 拒——这不是她的填法问题，是补信息卡本身不可用，已升级为 P1 前置（R13-8），**R13-8 未解则本条不转绿**。
 
 **处置栏新增待办（2026-11-24，PMO 派给开发）**：确认单上的 `pause-approve` / `pause-deny` 与 band 容器补 `data-pause-request-id="<requestId>"`——现在按钮上没有这个属性，脚本和人都只能靠「哪只可见」猜，同一时刻多张单时仍会点错，这是 `APPROVAL_NOT_FOUND` 与「点了等于没点」的成因之一。补完后复跑改为「先核属性再点」。
 
-**判绿条件（不放松）**：拒绝 3/3（257/258/257ms、`PAUSE_DENIED`）与任务级叫停 3/3（255～256ms、`paused`/`PAUSE_CANCELLED`）均已过、账本零增；**只剩批准链恰一次**（账本与 `attempts` 各恰增 1，deliver 再验 `delivery_records` 与 `ledger_id`）——这条过了本条转绿。
+**判绿条件（不放松）**：拒绝 3/3（257/258/257ms、`PAUSE_DENIED`）与任务级叫停 3/3（255～256ms、`paused`/`PAUSE_CANCELLED`）均已过、账本零增；剩两条：**R13-8 结构化补信息卡落地** + **批准链恰一次**（账本与 `attempts` 各恰增 1，deliver 再验 `delivery_records` 与 `ledger_id`）。两条都过本条才转绿。
 
 **R13-6（缺陷，P1，2026-11-24 登记）：`agent.loop.confirm` 阻塞到暂停超时（120 秒）。** 现象：`confirm` 调用要等到 `pauseTimeoutMs` 到期才返回，渲染层在这两分钟里卡住。处置：`confirm` 立即返回（发起执行、把暂停态交给既有暂停读数），渲染层靠 `agent.pause.pending` 轮询拿状态，不靠一次调用的返回值。责任：世界级开发程序员；复跑：读 `confirm` 的返回耗时（应远小于暂停窗）+ 期间界面仍可交互。
 
@@ -1452,7 +1452,13 @@ interface JourneyContext {
 
 **R13-7（风险，P2，2026-11-24 登记）：将来出现第二个调用方会踩 150 秒阻塞。** 主进程 `confirm` 仍会等到整条循环（含最长 150 秒暂停窗）才返回终态；现在只有渲染层一条调用方且已非阻塞。触发条件：新增任何 `await agent.loop.confirm(...)` 的调用方（新界面、助手第二入口、脚本化流程）。处置：新调用方一律 fire-and-forget + 读 `agent.pause.pending`/`agent/run-progress`；若要长期消除，再单独立项改契约并重写那 65 个用例，不在本片做。
 
-**R13-8（体验问题，P2，2026-11-24 登记，不阻塞第 13 片）：补信息卡让用户填 JSON。** 现状：批准后缺参数时，卡片只给一个文本框让用户填 JSON，填错还得靠 `Unrecognized key` 这类工具报错反推形状——对新手等同不可用。正确形态：**按工具 schema 生成结构化字段**（`platform` 选择器、`jobId` 从当前岗位带入或选择、`text` 文本域），校验前置、错误就地提示；JSON 只作为内部交换格式、不暴露给用户。排期：第 14/15 片带，不在本片阻塞；判据落地时另开 spec 条目，不在 10.12-08 里加码。
+**R13-8（缺陷，P1，2026-11-24 登记、当日由 P2 升级）：补信息卡只给 JSON 文本框，人无法完成审批链。**
+
+**登记史（不删改）**：最初按**体验问题（P2）**登记、排第 14/15 片。同日 QA 用两种形状各试一次——`{request:{…}}` 与 `{platform,jobId,text}`——**都报** `Unrecognized key: "jobId"`。说明**没人能从界面上推断出正确形状**：这不是「难看」，而是**审批门禁在真实使用里的一条死路**（按钮在 ≠ 路可走）。故**升级 P1**，并作为 spec 10.12-08 的**前置**：**R13-8 未解则 10.12-08 不转绿。**
+
+**处置（正经实现，不再猜）**：按工具 schema 生成结构化字段——`platform` 下拉（取已知平台）、`jobId` 从当前上下文/岗位带入（可改可空）、`text` 文本域；提交时由面板按字段名组装 `{request:{…}}`（这层由代码拼，**不让用户填 JSON**）；校验前置、错误就地提示到具体字段；JSON 只做内部交换格式。
+
+责任：世界级开发程序员（实现）→ 刁钻的QA（用同一路径复验）。判据：批准 → 填三格 → 继续 → `usage_ledger` 与 `outbound_attempts` 各恰增 1（deliver 再验 `delivery_records` 与 `ledger_id` 相同）。
 
 > **2026-11-24 dated 注（QA 自纠留档，结论以本条为准）**：QA 曾据单条 run 推「界面路径拒绝无效、桥接口有效」的通道差异假说，被 `agent_run` 全量数据推翻——拒绝并非无效，而是**常被忽略后靠超时收尾**，真正生效的两次也用了 86/118 秒。自纠原文保留在 `10.12-qa-approval-three-actions.txt` 的「更正上一节」，不抹掉。
 
