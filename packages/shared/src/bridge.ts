@@ -250,6 +250,7 @@ export const RENDERER_ALLOWLIST = [
   'jd.capture.status',
   'jd.store.list',
   'jd.store.status',
+  'jd.store.remove',
   // 2.5 的会话面：三条都是**读**（读页面、读库、读概况）。打招呼走 `outbound.greet.perform`
   // 而不是直连适配器——界面能调的那一口必须已经在闸门里（1.9-05 要拦的就是绕过闸门的外发口）。
   'conversation.store.syncFrom',
@@ -2921,6 +2922,11 @@ export interface BridgeSignatures {
   /** JD 库概况与 schema 版本（spec 2.3-05 的实测读数）。 */
   'jd.store.status': { args: []; returns: JdStoreStatusView };
   /**
+   * 删除一条库内岗位（2026-11-24 用户裁定）：只删 `jobs` 行，账本/投递记录/追踪/会话一律保留。
+   * 界面必须先做二次确认（`ArmButton` 两步），并在确认前说明「投递与沟通记录会保留」。
+   */
+  'jd.store.remove': { args: [jobId: string, platform?: string]; returns: JdRemoveResultView };
+  /**
    * 读某个目标的会话页并落库（spec 2.5-07）。只读动作：不点发送、不进额度闸门，
    * 所以它可以摆在界面上反复按——第二遍全是 `duplicate` 正是这条验收要的读数。
    * 目标两种坐标至少给一只（P8 裁定⑲）：岗位地址能定位会话的站点给 `jobId`，
@@ -4135,6 +4141,12 @@ export interface JobListResultView {
   total: number;
   matched: number;
   rows: JobRowView[];
+}
+
+/** 删除一条库内岗位的读数（2026-11-24）。`removed === 0` 表示库里本来就没有这一行。 */
+export interface JdRemoveResultView {
+  /** 实际删掉的行数（同 jobId 跨平台时可能 >1，界面总带平台所以正常是 1） */
+  removed: number;
 }
 
 /** `jd.store.status` 的读数：库内概况 + schema 版本（2.3-05 的实测依据）。 */

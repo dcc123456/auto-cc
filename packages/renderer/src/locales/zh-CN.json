@@ -759,7 +759,13 @@
         "unknown": "当前值「{{value}}」不在码表里：这一维不会被发送",
         "clearSearch": "清空搜索"
       },
-      "districtUnavailable": "该城市暂无区县码（现有区县码属于{{city}}）"
+      "districtUnavailable": "该城市暂无区县码（现有区县码属于{{city}}）",
+      "removeButton": "删除岗位",
+      "removeArmed": "再按一次确认删除",
+      "removeHint": "只删库内岗位与抓到的详情；投递记录、沟通记录与追踪进度会保留",
+      "removeAction": "删除岗位",
+      "removeDone": "已从库内删除「{{title}}」（账本/投递/追踪未动）",
+      "removeGone": "这条岗位已经不在库里"
     },
     "consent": {
       "heading": "首次启用 {{platform}} 的自动化：先确认风险",

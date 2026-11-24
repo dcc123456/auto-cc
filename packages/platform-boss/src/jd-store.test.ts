@@ -633,3 +633,53 @@ describe('对话侧的只读回看（spec 8.10-04）', () => {
     expect(jd.upsert(draft()).created).toBe(true);
   });
 });
+
+/**
+ * 删除库内岗位（2026-11-24 用户裁定）：只清岗位与抓取详情，审计记录一律不动。
+ *
+ * 这条判据的重点不是「行少了」，而是**删完之后账本/投递记录/追踪/会话仍在**——
+ * 删岗位不等于「那件事没发生过」。所以这里先造一条「已投递」的岗位（账本 + 投递记录 + 追踪 + 会话），
+ * 再删岗位，逐表数一遍。
+ */
+describe('删除库内岗位只动 jobs 与详情（2026-11-24 裁定）', () => {
+  it('删掉之后账本 / 投递记录 / 会话都还在', async () => {
+    const rig = await boot();
+    // 账本与投递记录属于别的包的迁移（本包测试库里没有），这里只建「够数行」的最小表壳——
+    // 这条判据要证明的是 `remove()` **不碰它们**，不是它们的 DDL 长什么样。
+    rig.db.exec(
+      `CREATE TABLE IF NOT EXISTS usage_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT, target_id TEXT, ts INTEGER, source TEXT)`,
+    );
+    rig.db.exec(
+      `CREATE TABLE IF NOT EXISTS delivery_records (ledger_id INTEGER, platform TEXT, job_id TEXT, snapshot_id TEXT, ts INTEGER)`,
+    );
+    rig.db
+      .prepare(
+        `INSERT INTO jobs (platform, job_id, title, company, description, requirements_json, source_url, captured_at)
+         VALUES ('boss', 'job-del', '前端工程师', '某公司', '正文', '[\"要求一\"]', 'https://example.com/job-del', 1)`,
+      )
+      .run();
+    rig.db
+      .prepare(`INSERT INTO usage_ledger (action, target_id, ts, source) VALUES ('deliver', 'job-del', 10, 'manual')`)
+      .run();
+    const ledgerId = Number((rig.db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number }).id);
+    rig.db
+      .prepare(
+        `INSERT INTO delivery_records (ledger_id, platform, job_id, snapshot_id, ts) VALUES (?, 'boss', 'job-del', 'snap-1', 11)`,
+      )
+      .run(ledgerId);
+    seedMessage(rig.db, 'job-del', 'recruiter', '你好');
+
+    expect(rig.jd.remove('job-del', 'boss')).toEqual({ removed: 1 });
+    expect(rig.jd.detail('job-del', 'boss')).toBeNull();
+
+    const count = (sql: string): number => Number((rig.db.prepare(sql).get() as { n: number }).n);
+    expect(count(`SELECT COUNT(*) AS n FROM usage_ledger WHERE target_id = 'job-del'`)).toBe(1);
+    expect(count(`SELECT COUNT(*) AS n FROM delivery_records WHERE job_id = 'job-del'`)).toBe(1);
+    expect(count(`SELECT COUNT(*) AS n FROM conversation_messages WHERE job_id = 'job-del'`)).toBe(1);
+  });
+
+  it('库里没有这条时 removed=0，不假装删掉了什么', async () => {
+    const rig = await boot();
+    expect(rig.jd.remove('not-there', 'boss')).toEqual({ removed: 0 });
+  });
+});

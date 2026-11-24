@@ -448,6 +448,29 @@ export class JdStoreService extends Service {
   };
 
   /**
+   * 删除一条库内岗位（2026-11-24 用户裁定：岗位列表要可删除）。
+   *
+   * **只删 `jobs` 那一行**（抓到的摘要与详情都在这张表里：`description` / `requirements_json`）。
+   * 账本 `usage_ledger`、投递记录 `delivery_records`、追踪 `job_tracking`、会话 `conversation_messages`
+   * **一律不动**——那些是审计事实：删岗位不等于「那件事没发生过」。界面在确认前会明说「投递与沟通记录会保留」。
+   * 反过来说，这里也不做「软删除」：库里多一个 `deleted_at` 列会让列表、统计、漏斗每处都要记着过滤它，
+   * 而用户要的是「从我的列表里消失」。
+   * @param jobId 平台侧岗位 id（与 `jobs.job_id` 同源，不是库内自增 id）
+   * @param platform 平台标识；省略则删掉所有同 jobId 的行（界面总会带平台，留下这个口给脚本）
+   * @returns 删掉的行数（0 = 本来就没有，界面据此说「已经不在库里」而不是假装成功）
+   */
+  remove = (jobId: string, platform?: string): { removed: number } => {
+    const where = platform === undefined ? 'job_id = ?' : 'job_id = ? AND platform = ?';
+    const args = platform === undefined ? [jobId] : [jobId, platform];
+    const result = this.store.db.prepare(`DELETE FROM jobs WHERE ${where}`).run(...args);
+    const removed = Number(result.changes ?? 0);
+    this.ctx.logger.info(
+      `删除库内岗位 ${platform ?? '*'} / ${jobId}：删掉 ${String(removed)} 行（账本/投递/追踪未动）`,
+    );
+    return { removed };
+  };
+
+  /**
    * 这个平台侧岗位 id 在库里有没有一条记录（spec 5.7-f 的 `JdKeySource.hasJob`）。
    *
    * 不另开一条 SQL：存在性就是"按同一判据读得到一行"，`detail()` 已经决定了那判据是什么

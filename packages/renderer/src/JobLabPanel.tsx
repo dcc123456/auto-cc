@@ -37,6 +37,7 @@ import { resolveCapturePlatform, shouldOfferPlatformChoice } from './platform-ch
 import { platformLabel } from './platform-label';
 import { ConsentOverlay, ConsentStatusRow } from './ConsentModal';
 import {
+  ArmButton,
   Banner,
   BLOCK_EDGE_CLASS,
   BLOCK_SURFACE_CLASS,
@@ -577,6 +578,27 @@ export function JobLabPanel() {
   };
 
   /**
+   * 删除一条库内岗位（2026-11-24 用户裁定）。
+   *
+   * 只清「库内岗位 + 抓到的详情」（同一张 `jobs` 表），账本 / 投递记录 / 追踪 / 会话一律保留——
+   * 那是审计事实：删岗位不等于那件事没发生过。界面上用两步 armed 键做二次确认，
+   * 文案明说「投递与沟通记录会保留」。删完关弹窗并重读列表（Home/统计由下一次读取同步）。
+   * @param row 当前弹窗指着的那一行
+   */
+  const removeJob = (row: JobRowView): void => {
+    void run(t('jd.removeAction'), () => bridge?.jd['store.remove'](row.jobId, row.platform), {
+      apply: () => {
+        setBridgeError(undefined);
+        setDetailOpen(false);
+        setSelectedRowKey(undefined);
+        listJobs();
+      },
+      describe: (value) => t('jd.removeDone', { title: row.title, removed: value.removed }),
+      onError: setBridgeError,
+    });
+  };
+
+  /**
    * 把筛选草稿收成服务端条件。
    * @returns 只带非空字段的筛选对象；全空时返回空对象（服务端按「不筛」处理）
    */
@@ -838,7 +860,7 @@ export function JobLabPanel() {
 
       <ConsentOverlay consent={consent} />
 
-      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
+      <section className="@container rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.criteriaHeading')}</h3>
         {/* 多平台才需要人挑（spec 2.3-12）：只有一个可抓取平台时省掉这一格，点搜索就直接挂它。 */}
         {shouldOfferPlatformChoice(searchPlatforms) && (
@@ -860,14 +882,9 @@ export function JobLabPanel() {
           </div>
         )}
         <div className="mt-2 flex flex-col gap-2">
-          <DeskField
-            action="jd-keyword"
-            data-testid="jd-keyword"
-            value={keywordDraft}
-            onValueChange={setKeywordDraft}
-            placeholder={t('jd.keywordPlaceholder')}
-          />
-          <div className="flex gap-2">
+          {/* 第一行（2026-11-24 用户裁定：搜索条件不许一个字段占一行）：城市 + 关键词 + 条数同行。
+              窄窗（@xl 以下）自动落成一列，不横向溢出。 */}
+          <div className="grid min-w-0 grid-cols-1 gap-2 @xl:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_6rem]">
             {/* 城市（2026-11-23 裁定①）：知识包有 city 码表就换选择器（373 项 + 搜索），
                 打错城市会给 amber 提示，不再是「凭记忆手打、打错静默空结果」。
                 没有码表的装配（仿站那份包）保留手输框——那是唯一能用的形态，不硬造码。 */}
@@ -914,16 +931,13 @@ export function JobLabPanel() {
                 />
               </div>
             )}
-            {declaresExperience ? null : (
-              <DeskField
-                action="jd-experience"
-                data-testid="jd-experience"
-                value={experienceDraft}
-                onValueChange={setExperienceDraft}
-                placeholder={t('jd.experiencePlaceholder')}
-                className="flex-1"
-              />
-            )}
+            <DeskField
+              action="jd-keyword"
+              data-testid="jd-keyword"
+              value={keywordDraft}
+              onValueChange={setKeywordDraft}
+              placeholder={t('jd.keywordPlaceholder')}
+            />
             <DeskField
               action="jd-limit"
               type="number"
@@ -932,14 +946,23 @@ export function JobLabPanel() {
               value={limitDraft}
               onValueChange={setLimitDraft}
               placeholder={t('jd.limitPlaceholder')}
-              className="w-24"
             />
           </div>
+          {/* 经验那一维：平台声明了码表就走下面的筛选网格（单选下拉），没声明才留这只手输框。 */}
+          {declaresExperience ? null : (
+            <DeskField
+              action="jd-experience"
+              data-testid="jd-experience"
+              value={experienceDraft}
+              onValueChange={setExperienceDraft}
+              placeholder={t('jd.experiencePlaceholder')}
+            />
+          )}
           {/* 附加筛选（2026-11-23 实测 9 维）：**只有知识包声明了参数名与标签表的维度才上屏**。
               这样界面不会长出「看起来能筛」的控件；传了站上不存在的取值由适配器结构化拒绝。 */}
           {searchFilters.length > 0 ? (
             <div
-              className="grid grid-cols-1 gap-2 @2xl:grid-cols-2 @4xl:grid-cols-4"
+              className="grid grid-cols-1 gap-2 @xl:grid-cols-2 @4xl:grid-cols-3"
               data-testid="jd-search-filters"
               data-filter-count={searchFilters.length}
             >
@@ -1322,6 +1345,17 @@ export function JobLabPanel() {
                   </DeskButton>
                 ) : (
                   <>
+                    {/* 删除（2026-11-24 裁定）：两步确认——第一下只武装、四秒内再按一下才删；
+                        确认文案里写明「投递与沟通记录会保留」，因为账本/投递/追踪/会话一条都不动。 */}
+                    <ArmButton
+                      action="jd-remove"
+                      confirmAction="jd-remove-confirm"
+                      onConfirm={() => removeJob(selectedRow)}
+                      armedLabel={t('jd.removeArmed')}
+                      tip={t('jd.removeHint')}
+                    >
+                      {t('jd.removeButton')}
+                    </ArmButton>
                     <span className="min-w-0 flex-1 truncate text-[11px] text-slate-400" data-testid="jd-action-target">
                       {t('jd.actionTarget', { title: selectedRow.title, company: selectedRow.company })}
                     </span>

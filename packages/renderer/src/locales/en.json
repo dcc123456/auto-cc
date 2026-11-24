@@ -759,7 +759,13 @@
         "unknown": "“{{value}}” is not in the code table; this filter will not be sent",
         "clearSearch": "Clear search"
       },
-      "districtUnavailable": "No district codes for this city yet (current district codes belong to {{city}})"
+      "districtUnavailable": "No district codes for this city yet (current district codes belong to {{city}})",
+      "removeButton": "Delete job",
+      "removeArmed": "Press again to confirm",
+      "removeHint": "Only the stored job and its captured details are removed; delivery, conversation and tracking records are kept",
+      "removeAction": "Delete job",
+      "removeDone": "Removed “{{title}}” from the library (ledger/delivery/tracking untouched)",
+      "removeGone": "That job is no longer in the library"
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",
