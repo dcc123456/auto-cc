@@ -11,9 +11,9 @@
  * 元数据、并把「未登记的源」与「不合法的入参」这两条**根本不该碰内核**的路径打死，
  * 真正要页面的成功分支仍归 harness 打 fixture 站点验收。
  */
-import { Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
+import { Context, NO_CONFIG, runAsUserCall, type Fiber } from '@auto-cc/core';
 import type { WebContents } from 'electron';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { BrowserPageService, type BrowserPageConfig } from './index.js';
 import {
   FAKE_PNG_BYTES,
@@ -68,6 +68,7 @@ async function boot(view: WebContents | null = null, overrides: Partial<BrowserP
   const shell = ctx.get('shell') as unknown as FakeShellService;
   shell.contents = view;
   return {
+    ctx,
     page: ctx.get('browser.page') as BrowserPageService,
     pageFiber,
     shell,
@@ -233,6 +234,80 @@ describe('导航许可（2026-11-22 裁定：只剩协议一道）', () => {
     );
     await expect(page.navigate('javascript:alert(1)')).rejects.toMatchObject({ code: 'NAVIGATE_URL_REJECTED' });
     expect(urls).toEqual([]);
+  });
+});
+
+/**
+ * 人那一路的真站接触审计（10.12-12）。
+ *
+ * 视图替身只记录交给 `loadURL` 的字符串，不发起任何网络请求；`runAsUserCall` 模拟网关给渲染层调用打的标。
+ * 断言的对象是**日志原文**：host/source/时刻必须在，查询串与它的值不许出现。
+ */
+describe('人那一路的审计（10.12-12）', () => {
+  it('非回环导航记且只记一条脱敏 INFO，行为本身不被自动化闸拦', async () => {
+    const urls: string[] = [];
+    const contents = viewWithLoad((url) => {
+      urls.push(url);
+      setTimeout(() => fireViewEvent(contents, 'did-finish-load'), 0);
+      return Promise.resolve();
+    });
+    const { ctx, page } = await boot(contents);
+    const info = vi.spyOn(ctx.logger, 'info').mockImplementation(() => undefined);
+    try {
+      await runAsUserCall(
+        async () => await page.navigateFromUser('https://example.test/job/1001?query=secret&name=alice'),
+      );
+      const audit = info.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => line.startsWith('人请求导航到非回环主机：'));
+      expect(audit).toHaveLength(1);
+      expect(audit[0]).toContain('source=user');
+      expect(audit[0]).toContain('host=example.test');
+      expect(audit[0]).toMatch(/at=\d+/u);
+      expect(audit[0]).not.toContain('query=');
+      expect(audit[0]).not.toContain('secret');
+      expect(urls).toEqual(['https://example.test/job/1001?query=secret&name=alice']);
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it('后续装载失败也仍留一条请求审计，不写成已导航成功', async () => {
+    const { ctx, page } = await boot(viewWithLoad(() => Promise.reject(new Error('LOAD_FAILED'))));
+    const info = vi.spyOn(ctx.logger, 'info').mockImplementation(() => undefined);
+    try {
+      await expect(
+        runAsUserCall(async () => await page.navigateFromUser('https://example.test/fail?query=secret')),
+      ).rejects.toThrow('LOAD_FAILED');
+      const audit = info.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => line.startsWith('人请求导航到非回环主机：'));
+      expect(audit).toHaveLength(1);
+      expect(audit[0]).toContain('source=user');
+      expect(audit[0]).toContain('host=example.test');
+      expect(audit[0]).toMatch(/at=\d+/u);
+      expect(audit[0]).not.toContain('query=');
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it('回环导航不产生审计行', async () => {
+    const contents = viewWithLoad(() => {
+      setTimeout(() => fireViewEvent(contents, 'did-finish-load'), 0);
+      return Promise.resolve();
+    });
+    const { ctx, page } = await boot(contents);
+    const info = vi.spyOn(ctx.logger, 'info').mockImplementation(() => undefined);
+    try {
+      await runAsUserCall(async () => await page.navigateFromUser('http://127.0.0.1:10233/chat?targetId=1001'));
+      const audit = info.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => line.startsWith('人请求导航到非回环主机：'));
+      expect(audit).toEqual([]);
+    } finally {
+      info.mockRestore();
+    }
   });
 });
 

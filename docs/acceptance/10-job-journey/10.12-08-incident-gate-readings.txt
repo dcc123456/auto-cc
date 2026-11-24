@@ -86,8 +86,16 @@ PMO 指出的洞：原先 `navigate(url, source)` / `open(platform, source)` 的
 
 两条 `…FromUser` 只要目标是非回环主机，就在主进程日志里各记一条 INFO：
 
-- `browser.page.navigateFromUser`：`人这一路导航到非回环主机：source=user host=<host> origin=<origin> at=<毫秒时刻>`；
-- `sessions.openFromUser`：`人这一路把内核视图挂到非回环主机：source=user platform=<平台> host=<host> at=<毫秒时刻>`。
+- `browser.page.navigateFromUser`：`人请求导航到非回环主机：source=user host=<host> origin=<origin> at=<毫秒时刻>`；
+- `sessions.openFromUser`：`人请求把内核视图挂到非回环主机：source=user platform=<平台> host=<host> at=<毫秒时刻>`。
 
 只记 `host` / `origin`，不写带查询串的完整地址（查询串可能有搜索词等个人数据）。回环目标不记（本地靶站不属于这条账）。
-这两行就是以后数「人这一路碰了几次真站」的唯一依据；不在取证脚本里调用 `…FromUser`，也不拿真站去验这条审计。
+日志在动作前落：记的是**请求**，不是「已经成功导航/挂载」；后续失败也留这一条。真实接触是否发生仍看既有导航/挂载结果读数，两类不混。
+取证不调用活体 `…FromUser`，也不拿真站去验这条审计。
+
+### 可复跑测试（零真实网络）
+
+- `packages/browser/src/page-service.test.ts`：假 WebContents + INFO spy。非回环恰 1 条、含 `source=user`/host/时刻且不含 query；回环不记；后续 `loadURL` 抛 `LOAD_FAILED` 时仍恰 1 条；无网关标的用例继续断言 `INVALID_ARGUMENT`。
+- `packages/sessions/src/audit.test.ts`：假 Electron 分区 + 假挂载宿主 + 本地 store + INFO spy。非回环恰 1 条且脱敏；回环不记；宿主抛 `MOUNT_FAILED` 时仍恰 1 条；无网关标拒绝且不挂载不记。
+
+读数：`pnpm --filter @auto-cc/plugin-browser test` → **340 例全过**；`pnpm --filter @auto-cc/plugin-sessions test` → **32 例全过**。两边都没有真实网络调用。
