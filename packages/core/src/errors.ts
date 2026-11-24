@@ -25,6 +25,9 @@ export type AppErrorCode =
   // 10.2 外发恢复：总开关停用、上一次结局未对账、站点会抢在应用前发一条无法逐笔对齐的默认问候。
   | 'OUTBOUND_DISABLED'
   | 'OUTBOUND_RECONCILIATION_REQUIRED'
+  // 窗口不在前台时的外发前置拒绝（2026-11-24 萌新 P1）：hidden 时页面动作不落页，旧行为会先留下一条
+  // `unknown` 尝试、再投就要求对账。这里在**动手之前**拒绝，零 attempt、零账本。
+  | 'OUTBOUND_WINDOW_NOT_VISIBLE'
   | 'OUTBOUND_UNTRACKED_SITE_GREETING'
   // 择机投递（spec 5.7-03）：无人值守那一路被时机规则判成「此刻不该递」。它与上面三个码都不合并——
   // 那三个是「试了没成」，这一条是「压根没试」：不落账、不进被拒流水、下一次计划点照跑。

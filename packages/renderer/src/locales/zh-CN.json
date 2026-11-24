@@ -871,7 +871,13 @@
       "noLedger": "不落账",
       "useSample": "生成并使用样例 PDF",
       "useSampleAction": "生成样例 PDF",
-      "useSampleDone": "样例 PDF 已生成（{{pages}} 页），本屏投递将使用它"
+      "useSampleDone": "样例 PDF 已生成（{{pages}} 页），本屏投递将使用它",
+      "needFile": "还没选简历文件：先点「选择文件」，或用「生成并使用样例 PDF」备一份，再投递",
+      "targetLine": "投递目标：{{title}} · {{company}}",
+      "targetNone": "还没选目标：在下方岗位卡上点「投递简历」选一行",
+      "targetChosen": "已选投递目标：{{title}}；接下来选文件（或用样例 PDF），再点「提交投递」",
+      "submitButton": "提交投递",
+      "needTarget": "先选投递目标：在岗位卡上点一下「投递简历」"
     },
     "action": {
       "noBridge": "桥接不可用：当前不在 Electron 宿主内",

@@ -429,6 +429,31 @@ export function HomePanel() {
   // 模型这一格失败（例如 llm-settings 没挂载）时只表示「不知道」，不能让首页长出一条假的阻断条。
   const [model, reloadModel] = useBlock(loadModel, timeoutReason);
 
+  /**
+   * 回到 Home 就自动重读（2026-11-24 萌新 P1）。
+   *
+   * 「手动点刷新才对齐」不算通过：七个视图只改 display、不卸载，所以投递/打招呼之后切回 Home
+   * 看到的还是挂载那一刻的账本与追踪。这里用可见性观察，在**这一屏真正露出来时**重读四块读数，
+   * 不新增轮询、不新增事件（同 `ResumeDesk` 的做法）。
+   */
+  useEffect(() => {
+    const host = document.querySelector<HTMLElement>('[data-view-scroll="chat"]');
+    if (!host || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        // 只在这一屏可见时刷新；不可见时不做无谓重读。
+        reloadNumbers();
+        reloadTrend();
+        reloadNext();
+        reloadModel();
+      },
+      { threshold: 0 },
+    );
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [reloadNumbers, reloadTrend, reloadNext, reloadModel]);
+
   /** 「接下来」的六条（按阻断优先），并按当前状态算出哪几条该出现。 */
   const steps = useMemo(() => {
     const value = next.state === 'ready' ? next.value : undefined;

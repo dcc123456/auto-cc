@@ -871,7 +871,13 @@
       "noLedger": "no ledger row",
       "useSample": "Generate and use sample PDF",
       "useSampleAction": "Generate sample PDF",
-      "useSampleDone": "Sample PDF generated ({{pages}} pages); this delivery will use it"
+      "useSampleDone": "Sample PDF generated ({{pages}} pages); this delivery will use it",
+      "needFile": "No resume file yet: pick one with \"Choose file\", or use \"Generate and use sample PDF\" first",
+      "targetLine": "Delivering to: {{title}} · {{company}}",
+      "targetNone": "No target yet: pick a card with \"Deliver resume\" below",
+      "targetChosen": "Target chosen: {{title}}; pick a file (or sample PDF), then press Submit",
+      "submitButton": "Submit delivery",
+      "needTarget": "Pick a target first: press \"Deliver resume\" on a job card"
     },
     "action": {
       "noBridge": "Bridge unavailable: not running inside the Electron host",

@@ -489,7 +489,7 @@ describe('投递的档位与人工确认（spec 2.6-01 / 2.6-06）', () => {
       committed: false,
       ledgerId: null,
       waitedMs: 0,
-      reason: '档位 suggest：已备好 resume.pdf，未发送',
+      reason: '档位 suggest：已备好 resume.pdf，未发送（切到半自动档或全自动档后再发）',
       source: `resume:${RESUME_SHA.slice(0, 12)}@resume.pdf`,
     });
     expect(hand.calls).toHaveLength(0);

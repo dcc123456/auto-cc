@@ -264,6 +264,8 @@ export function JobLabPanel() {
   const cityFilter = searchFilters.find((filter) => filter.dimension === 'city');
   /** 简历 PDF 的绝对路径：留空则由主进程用 `outbound.deliver` 配置里的 `resumeFile`（P3 之前的临时入口）。 */
   const [resumePathDraft, setResumePathDraft] = useState('');
+  /** 投递表单里选定的目标行（2026-11-24：写路径收进表单后，卡片只负责选目标）。 */
+  const [deliverTargetKey, setDeliverTargetKey] = useState<string>();
   /** 最近一次打招呼的回执（`GreetReceiptView`）：闸门拒了就没有回执，界面上只剩结构化错误（spec 2.5-02）。 */
   const [lastGreet, setLastGreet] = useState<GreetReceiptView>();
   /** 最近一次打招呼的阶段流水（spec 2.5-16）：最新在前，只在它跑的那一条目标上累积。 */
@@ -341,7 +343,7 @@ export function JobLabPanel() {
     await refreshConsent([...platforms]);
   }, [bridge, refreshConsent]);
 
-  const { busy, notice, noticeTone, run } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
   /**
    * 确认 / 拒绝两个按钮用**另一个**忙碌态实例（spec 2.6-01）。
    *
@@ -734,8 +736,42 @@ export function JobLabPanel() {
    * `committed:false` 的回执、账本一行都不增。被拒 / 超时 / 已下架都以结构化错误上浮，界面上只剩错误码。
    * @param row 库内的一行 JD（`jobId` 是投递目标，`title` / `company` 只进确认卡片与回执）
    */
-  const deliver = (row: JobRowView) => {
-    return void consent.ensure([row.platform], () => {
+  /**
+   * 卡片上的「投递简历」只**选目标**（2026-11-24 裁定③：只留一条写路径）。
+   *
+   * 真正的投递统一由表单里的「提交投递」触发：卡片各写一次、表单再写一次就是两条写路径，
+   * QA 的「点卡片零 attempt 且无提示」正是被这两条缝夹出来的。
+   * @param row 这张卡片对应的库内岗位
+   */
+  const chooseDeliverTarget = (row: JobRowView): void => {
+    setDeliverTargetKey(rowKey(row));
+    setBridgeError(undefined);
+    setNotice(t('deliver.targetChosen', { title: row.title }), 'celadon');
+    document.querySelector<HTMLButtonElement>('[data-action="deliver-submit"]')?.focus();
+  };
+
+  /** 表单里选中的那一行。 */
+  const deliverTarget = jobList?.rows.find((row) => rowKey(row) === deliverTargetKey);
+
+  /**
+   * 表单里的唯一提交入口。
+   *
+   * 三个前置各给可见原因：没选目标、没选文件、上一笔还在飞。全部满足才调服务；
+   * 服务侧另有窗口可见性与档位判定，界面这一层不重复解释那些规则。
+   */
+  const submitDeliver = (): void => {
+    const row = deliverTarget;
+    if (!row) {
+      setNotice(t('deliver.needTarget'), 'amber');
+      return;
+    }
+    if (resumePathDraft.trim() === '') {
+      setBridgeError(undefined);
+      setNotice(t('deliver.needFile'), 'amber');
+      document.querySelector<HTMLButtonElement>('[data-action="deliver-pick-file"]')?.focus();
+      return;
+    }
+    void consent.ensure([row.platform], () => {
       void run(
         t('deliver.action', { title: row.title }),
         () =>
@@ -744,7 +780,7 @@ export function JobLabPanel() {
             jobId: row.jobId,
             title: row.title,
             company: row.company,
-            filePath: resumePathDraft.trim() || undefined,
+            filePath: resumePathDraft.trim(),
           }),
         {
           apply: (receipt) => {
@@ -1463,7 +1499,7 @@ export function JobLabPanel() {
                       disabled={isActionDisabled}
                       disabledReason={isActionDisabled ? 'ACTION_BUSY' : undefined}
                       disabledReasonLabel={isActionDisabled ? t('jd.reasonBusy') : undefined}
-                      onClick={() => deliver(selectedRow)}
+                      onClick={() => chooseDeliverTarget(selectedRow)}
                     >
                       <FileUp size={12} />
                       {t('deliver.rowButton')}
@@ -1653,6 +1689,39 @@ export function JobLabPanel() {
               : t('deliver.pickFileChosen', { name: resumePathDraft.split('/').pop() ?? resumePathDraft })}
           </span>
         </DeskActionRow>
+
+        {/* 唯一的写路径（2026-11-24 裁定③）：先选目标、再有文件，最后由这颗键提交。
+            卡片上的「投递简历」只把目标选到这里，不再各写一份。 */}
+        <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="deliver-submit-row">
+          <span className="min-w-0 break-all text-[11px] text-slate-300" data-testid="deliver-target-line">
+            {deliverTarget
+              ? t('deliver.targetLine', { title: deliverTarget.title, company: deliverTarget.company })
+              : t('deliver.targetNone')}
+          </span>
+          <DeskButton
+            action="deliver-submit"
+            variant="seal"
+            compact
+            busy={!!busy}
+            disabled={!!busy}
+            disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+            disabledReasonLabel={busy !== undefined ? t('jd.reasonBusy') : undefined}
+            onClick={submitDeliver}
+          >
+            <FileUp size={12} />
+            {t('deliver.submitButton')}
+          </DeskButton>
+          {/* 两个前置缺哪个就写哪个（禁用说明之外再给一句邻接原因，spec 10.10-18）。 */}
+          {deliverTarget === undefined ? (
+            <span className="text-[11px] text-amber" data-testid="deliver-submit-reason">
+              {t('deliver.needTarget')}
+            </span>
+          ) : resumePathDraft.trim() === '' ? (
+            <span className="text-[11px] text-amber" data-testid="deliver-submit-reason">
+              {t('deliver.needFile')}
+            </span>
+          ) : null}
+        </div>
 
         <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('deliver.pendingHeading')}</h4>
         {pendingApprovals.length === 0 ? (

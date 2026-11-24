@@ -568,6 +568,25 @@ export class OutboundDeliverService extends Service {
           ts: nowMs + waitedMs,
         }),
     );
+    // 投递成功即写追踪（2026-11-24 萌新 P1）：卡面「已投递」、Home「岗位进度」与追踪页都读这张表，
+    // 只落账不落追踪，就会出现「投递成功 1 笔、进度 0」的自相矛盾。写失败不回滚投递——账与投递记录已经落定，
+    // 这里只记一条日志，界面下一次重读会如实显示追踪缺一行。
+    if (jobId !== null && jobId !== undefined) {
+      try {
+        maybeService<{
+          record: (input: { platform: string; jobId: string; to: string; sourceRef: string }) => unknown;
+        }>(this.ctx, 'journey.tracking')?.record({
+          platform,
+          jobId,
+          to: 'delivered',
+          sourceRef: `ledger:${String(ledgerId)}`,
+        });
+      } catch (error) {
+        this.ctx.logger.warn(
+          `投递已落账，但追踪没写上（${error instanceof Error ? error.message : String(error)}）：岗位 ${platform}/${jobId}，账本行 ${String(ledgerId)}`,
+        );
+      }
+    }
     this.ctx.logger.info(
       `简历已投递并落账：目标 ${targetKey} · 文件 ${attachment.fileName}（${String(attachment.sizeBytes)} 字节）· 等待 ${String(waitedMs)}ms · 来源 ${source} · 账本行 ${String(ledgerId)} · 快照 ${snapshotId ?? '（请求未带快照引用）'}`,
     );
@@ -615,7 +634,13 @@ export class OutboundDeliverService extends Service {
         nowMs: staged.nowMs,
       });
     }
-    if (this.config.autonomy === 'suggest') {
+    // 档位以**会话当前档**为准（2026-11-24 萌新 P0）：底栏写「只建议」时点投递却直接发了，
+    // 与页面「建议档只准备文件、不发送」的承诺相反。服务自身的 `autonomy` 配置另有缺省（装配为 auto），
+    // 所以这里现问一次 `chat.session`；没有会话服务（单测/工作流装配）时退回配置档，行为不变。
+    const sessionTier =
+      maybeService<{ current: () => { session: { autonomy: string } } }>(this.ctx, 'chat.session')?.current().session
+        .autonomy ?? null;
+    if (this.config.autonomy === 'suggest' || (sessionTier === 'suggest' && !staged.unattended)) {
       // 「仅辅助」的意思就是到此为止：界面上摆出要递什么，那一下由用户自己点（spec 2.6-06）。
       return {
         platform: staged.platform,
@@ -624,7 +649,7 @@ export class OutboundDeliverService extends Service {
         title: staged.title,
         company: staged.company,
         attachment: attachmentView(staged.attachment),
-        reason: `档位 suggest：已备好 ${staged.attachment.fileName}，未发送`,
+        reason: `档位 suggest：已备好 ${staged.attachment.fileName}，未发送（切到半自动档或全自动档后再发）`,
         ledgerId: null,
         waitedMs: 0,
         source: staged.source,
@@ -632,6 +657,21 @@ export class OutboundDeliverService extends Service {
         resumeVersion: staged.resumeVersion,
         committed: false,
       };
+    }
+    // 窗口不在前台就**不要动手**（2026-11-24 萌新 P1）：hidden 时页面点击不落页，旧行为会先留一条
+    // `unknown` 尝试，再投就报 `OUTBOUND_RECONCILIATION_REQUIRED`——等于用一条脏记录把人挡在外面。
+    // 这里在真正发之前拒绝：零 attempt、零账本，原因写在明面。没有壳层服务（单测/工作流装配）时不拦。
+    const hostStatus = maybeService<{ getStatus: () => { windowVisible: boolean; kernelViewVisible: boolean } }>(
+      this.ctx,
+      'shell',
+    )?.getStatus();
+    if (!staged.unattended && hostStatus && (!hostStatus.windowVisible || !hostStatus.kernelViewVisible)) {
+      throw new AppError(
+        'OUTBOUND_WINDOW_NOT_VISIBLE',
+        '窗口不在前台（或站点视图没显示）：先把应用窗口带到前台再投递。这次一步都没发，也没有留下待核对记录',
+        'outbound.deliver',
+        { windowVisible: hostStatus.windowVisible, kernelViewVisible: hostStatus.kernelViewVisible },
+      );
     }
     return this.commit(staged, signal);
   };
