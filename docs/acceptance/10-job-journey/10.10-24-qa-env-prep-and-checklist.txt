@@ -78,3 +78,34 @@ env -u ELECTRON_RUN_AS_NODE \
 | 16:11 | 起仿站 | `tsx scripts/fixture-server.ts` → `/boss` = 200 |
 | 16:11 | 一次性验证（非交接目录） | 起打包 app（10415）→ `pack=fixture`、内核 placeholder、22 只工具；随后杀实例、删 `/private/tmp/qa15-envcheck-ud` |
 | 16:12 | 重置交接目录 | `rm -rf /private/tmp/qa15-novice-ud` 后重建 → `ls` 只有 `settings.json` |
+
+## 五、预置 / 未预置清单（可逐项复核）
+
+盘点命令与读数（交接目录 `/private/tmp/qa15-novice-ud`）：
+
+```
+$ ls -la /private/tmp/qa15-novice-ud
+total 8
+drwxr-xr-x@ 3 dcc wheel  96 Nov 24 16:12 .
+-rw-r--r--@ 1 dcc wheel  37 Nov 24 16:12 settings.json
+
+$ for f in store.db settings.json SingletonLock "Local State"; do …; done
+store.db: absent
+settings.json: EXISTS
+SingletonLock: absent
+Local State: absent
+
+$ find . -maxdepth 2 -name "*.db*" -o -maxdepth 1 -type d
+.（除自身外没有任何目录）
+```
+
+| 项目 | 状态 | 说明 |
+| --- | --- | --- |
+| `settings.json`（仅 `platform-boss.pack=fixture`，37 字节） | **预置** | 唯一预置项；让实例起手就是仿站包，不需要任何人事后再改配置 |
+| `store.db`（以及库内的 `usage_ledger` / `outbound_attempts` / `delivery_records` / `conversation_messages` / `resume_docs` / `automations_consents` / `outbound_authorizations`） | **不存在** | 库文件根本没有，所以账本、投递记录、风险同意、授权单、简历一律为零——不是「有行但清空」，是**没有库** |
+| 浏览器会话分区（`Partitions/persist:*`） | **不存在** | 没有登录态、没有 cookie 文件、没有上次页面残留 |
+| `Local State` / `SingletonLock` | **不存在** | 没启动过 Chromium 主目录，也不是被别的实例占着的副本 |
+| 隐私条款同意痕迹 | **不存在** | 首启会重新弹一次，萌新必须自己按 |
+| 截图 / 探针 / 证据文件 | **无** | 交接目录里只有那一个 JSON |
+
+结论：环境准备**只做了「把包类型钉在仿站」这一件事**；简历、登录态、风险同意、授权单、账本全部是空的，萌新的所有推进都是他自己点出来的。
