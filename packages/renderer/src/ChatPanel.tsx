@@ -665,7 +665,7 @@ export function ChatPanel() {
       setDraft('');
       void (async () => {
         const drafted = await agentRun.propose(goal);
-        if (drafted && isAuto) await agentRun.confirm();
+        if (drafted && isAuto) agentRun.confirm();
       })();
       return;
     }

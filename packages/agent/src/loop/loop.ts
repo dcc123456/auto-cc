@@ -1010,7 +1010,7 @@ export class AgentLoopService extends Service {
     this.updateRun(runId, { status: 'running', planStepIndex: scope.cursor, tokensUsed: scope.tokensUsed });
     // 起跑就先推一次：界面画的是「第 0 步也已经开始」这一态，而不是等第一个工具返回才有动静。
     this.publish(scope.runId);
-    await this.execute(scope);
+    await this.executeToSettlement(scope);
     return this.read(runId);
   }
 
@@ -1093,7 +1093,7 @@ export class AgentLoopService extends Service {
       stopReason: 'RESUMED_AFTER_TAKEOVER',
     });
     this.publish(scope.runId);
-    await this.execute(scope);
+    await this.executeToSettlement(scope);
     return this.read(runId);
   }
 
@@ -1248,6 +1248,28 @@ export class AgentLoopService extends Service {
     // 接管那段账不在这里：号段 21 的 `takeover_events` 归 `browser.takeover`（那份事实的主人），
     // 循环只把自己的 `stop_reason` 落成 TAKEOVER_HELD，两边靠 run id 与时刻对上，不各存一份。
     this.store.upgrade();
+  }
+
+  /**
+   * 跑完这条 run，并保证**它一定会落到终态**。
+   *
+   * 为什么要有这一层：`execute` 的每一条正常出口都调 `finish`，但它自己也可能抛（库写失败、上下文被重建、
+   * 意料之外的断言）。2026-11-24 的活体里就见过一条 run 停在 `running` 而暂停单已经收掉——
+   * 那正是「界面还在转、库里永远不落定」的形态（第 13 片 D2）。所以入口统一加兜底：
+   * 抛出去也只落 `failed`，绝不留一条没有结局的 run。
+   * @param scope 本次 run 的作用域
+   */
+  private async executeToSettlement(scope: RunScope): Promise<void> {
+    try {
+      await this.execute(scope);
+    } catch (error) {
+      const code = error instanceof AppError ? error.code : 'STEP_UNSUCCESSFUL';
+      this.ctx.logger.warn(
+        `run ${scope.runId} 的循环在中途抛出（${code}：${error instanceof Error ? error.message : String(error)}），按失败收尾而不是留在 running`,
+      );
+      // `scopes` 里还有它才收：正常收尾已经在 `finish` 里把这一格删掉了，重复收尾会把一条 completed 改写成 failed。
+      if (this.scopes.has(scope.runId)) this.finish(scope, 'failed', code);
+    }
   }
 
   /**

@@ -96,11 +96,18 @@ export function useAgentRun(sessionId?: string) {
     [action, bridge, t],
   );
 
-  /** 确认这份计划并开始逐步执行（人按的那一口，模型按不到）。 */
-  const confirm = useCallback(async (): Promise<void> => {
+  /**
+   * 确认这份计划并开始逐步执行（人按的那一口，模型按不到）。
+   *
+   * **不 await 这条调用**（2026-11-24 第 13 片 D3）：主进程那一口的语义是「确认并跑完整条循环」，
+   * 碰到确认单/补充信息单会一直等到人表态或 120 秒超时——界面要是等它，按一下就画成「忙到超时」，
+   * 而人此刻最该做的恰恰是在卡片上表态。所以这里只把调用抛出去，状态一律走 `agent/run-progress`；
+   * 失败由那条通道与 `notice` 表达，不靠这一个 promise 的返回值。
+   */
+  const confirm = useCallback((): void => {
     const runId = runIdRef.current;
     if (!runId) return;
-    await action.run(t('agent.run.actionConfirm'), () => bridge?.agent['loop.confirm'](runId), {
+    void action.run(t('agent.run.actionConfirm'), () => bridge?.agent['loop.confirm'](runId), {
       apply: setRun,
     });
   }, [action, bridge, t]);
