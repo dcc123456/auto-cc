@@ -230,3 +230,38 @@ delivery_records: {ledger_id:3, job_id:"1004", snapshot_id:"406c8cc8…"}
 | 运行记录·看板 | 「账本 账本累计 **3** 次」、「投递成功 **1**」 | 与库一致（这处是对的） |
 
 **结论**：执行器那行在「母版读对 + 无人值守跑完」时是**对的**（「完成 1 岗」）；矛盾集中在**首页数字卡与首页漏斗**——它们没跟上账本/投递记录，而运行记录看板是对的。请顺着首页那两个聚合的取数条件查（很可能是按 `source` / `workflow_run_id` / 时间窗口过滤，把 `manual:` 与手工投递的账行漏掉了）。
+
+## 十一、新包 `56512842179de0cf…`（157780677 B、asar `f3e635a8…`，HEAD `428273d`）：反顺序通了；首页两处仍是界面层 bug
+
+实例：`--remote-debugging-port=10490`、`--user-data-dir=/private/tmp/qa26-ud`、`settings.json` 只有 `pack=fixture`、窗口 `visible`。先抓 11 条岗位（不影响母版时序），再按**反顺序**走。
+
+### 反顺序（空库先开面板 → 种样例 → 回面板 → 定制 → 开跑）：**通过**
+
+| 步骤 | 读数 |
+| --- | --- |
+| 空库先开主链面板 | 面板「**母版 0 份**」、`doc.list` = [] |
+| 去简历页「使用虚构样例」 | `doc.list` = `[{id:"resume-demo",name:"张三",parentDocId:null,…}]`、卡片 1 张 |
+| 切回岗位页 | 面板「**母版 1 份**」、卡片「**母版 resume-demo** · 定制 无 · 回执 无」——不再停留「母版 0 份」 |
+| 勾选 1004 →「先定制这一岗」 | `journey-auth-tailor-state`：`data-phase=done`、`data-elapsed-seconds=0`、`data-error-code=""`；`journey-auth-grant` 的 `aria-disabled=null`（**开跑键解锁**） |
+| 点「授权并开跑」 | `unattended.view` → `status=done`、`completed=1`、`failed=0`；执行器行「已完成 · **完成 1 岗** · 失败 0 · 待办 0」 |
+| 落地 | `usage_ledger`：`search/前端`、`greet/1004`、`deliver/1004` 三行；`delivery_records` 1；`job_status_events` 2 |
+
+**一条瑕疵**：`journey-auth-tailor-state` 上 `data-doc-id` 在 `done` 态是**空串**（属性在、值空），而卡片与结果都正常——这个字段现在还不能用来区分「解析成空」，建议 done 态把实际 docId 写进去。
+
+### 首页两处数字：**原始 =1、界面 =0，且重读两次都 =0 → 界面层 bug**
+
+按管理员要求的判别顺序：
+
+1. **直接打桥**（两种窗口都打了）：
+   - 7 天窗口 `funnel.query({fromMs: now-7d, toMs: now})` → `search=11, greet=1, reply=0, **deliver=1**, interview=0`，`tookMs=0`；
+   - 当天窗口（HomePanel 实际用的 `todayStart = 本地 00:00`）`funnel.query({fromMs:1795536000000, toMs:now})` → `search=11, greet=1, **deliver=1**`。
+2. **界面读两遍**（先读 → 切到岗位页 → 切回首页再读），两次完全一致：
+
+```
+投递成功 0 · 最近一笔 02:03:43 1004
+漏斗：搜索到岗位 0 · 打招呼 0 · 招聘方回复 0
+岗位进度 1（已投递 1 · 已约面 0）
+data-cell=sends → 「投递成功 0 近 7 天成功笔数 · 最近一笔 02:03:43 1004」
+```
+
+**结论**：桥返回 1、界面渲染 0，且 `useReloadWhenVisible` 之后仍 0，所以**不是区间/过滤 bug，是界面层**。补充定位：`data-cell=quota`（同一份 `funnelReply` 的 `quota.actions`）显示「1/10」是**对的**，说明该次的 `funnel.query` 回包本身没问题；坏在 `sends` 这一格（`deliverCount`）与趋势块漏斗那一排的取值/状态。请按 `HomePanel.tsx:334` 的 `levels.find(level==='deliver')` 与趋势块 `loadTrend` 的状态更新路径查一遍。
