@@ -11,6 +11,7 @@
  * 自测（本地仿站）：加 `--allow-loopback`。
  */
 import { readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -35,6 +36,13 @@ const dmgPath = path.resolve(repoRoot, flag('dmg', path.join('dist', 'auto-cc-0.
 const expectDmg = flag('expect-dmg', '');
 const expectAsar = flag('expect-asar', '');
 const allowLoopback = process.argv.includes('--allow-loopback');
+/**
+ * `store.db` 路径（应用 userData 下）。给了它就**直读表行数**当基线——
+ * 这是 QA 对读法的要求：`funnel.query` 的 deliver 计数是推导值、`recentAttempts(100)` 会封顶，
+ * 拿它们当「+1」的基准等于把风险带进对账。**只读打开、只跑 COUNT、用完即关**，
+ * 不进产品运行时、不是第二套连接池（进程结束就没了）。
+ */
+const dbPath = flag('db', '');
 
 /** 失败原因清单；全空即通过。 */
 const failures: string[] = [];
@@ -153,10 +161,38 @@ const main = async (): Promise<void> => {
   const funnel = await callBridge<{ levels: { level: string; count: number | null }[] }>(session, 'funnel.query', [
     { fromMs: 0, toMs: Date.now() },
   ]);
-  const deliverRows = funnel.ok ? (funnel.value.levels.find((row) => row.level === 'deliver')?.count ?? null) : null;
+  /** 直读三张表的行数（只读打开、COUNT 后立刻关）；读不到时为 null。 */
+  const exactCounts = ((): { ledger: number; attempts: number; deliveries: number } | null => {
+    if (dbPath === '') return null;
+    try {
+      const db = new DatabaseSync(path.resolve(repoRoot, dbPath), { readOnly: true });
+      const countOf = (table: string): number => {
+        const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n?: number | bigint };
+        return Number(row?.n ?? 0);
+      };
+      const counts = {
+        ledger: countOf('usage_ledger'),
+        attempts: countOf('outbound_attempts'),
+        deliveries: countOf('delivery_records'),
+      };
+      db.close();
+      return counts;
+    } catch (error) {
+      process.stdout.write(
+        `· 直读 ${dbPath} 失败（回退到推导值）：${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      return null;
+    }
+  })();
+  const deliverRows =
+    exactCounts?.deliveries ??
+    (funnel.ok ? (funnel.value.levels.find((row) => row.level === 'deliver')?.count ?? null) : null);
+  const ledgerTotal = exactCounts?.ledger ?? (summary.ok ? summary.value.total : null);
+  const attemptTotal = exactCounts?.attempts ?? (attempts.ok ? attempts.value.length : null);
   process.stdout.write(
-    `· 基线三数：usage_ledger 总 ${String(summary.ok ? summary.value.total : '?')}（今日 ${String(summary.ok ? summary.value.today : '?')}）` +
-      ` · outbound_attempts ${String(attempts.ok ? attempts.value.length : '?')}` +
+    `· 基线三数${exactCounts === null ? '（推导值：funnel / recentAttempts 封顶，建议补 --db 直读）' : '（直读表 COUNT）'}：` +
+      `usage_ledger ${String(ledgerTotal ?? '?')}（今日 ${String(summary.ok ? summary.value.today : '?')}）` +
+      ` · outbound_attempts ${String(attemptTotal ?? '?')}` +
       ` · delivery_records ${deliverRows === null ? '?' : String(deliverRows)}\n`,
   );
   check(summary.ok && attempts.ok && funnel.ok, '三个基线数都读到了（读不到就不许开跑）');
