@@ -72,3 +72,20 @@
 
 也就是说：**人只填了三格值，`{request:{…}}` 是代码拼的**，提交后入参一次通过工具自己的 schema，
 run 正常推进到执行（再被风险确认闸门挡住，零外发）。（这一格的证据是 DOM 与库里的观察原文；没有另存截图，卡面读数见上表。）
+
+## 补：批准链端到端「各恰增 1」自测（本机仿站）
+
+路径：`/plan outbound.greet.perform` → 确认 → 批准 → 补信息卡三格 → 提交（全走界面，桩只出步、不产参数）。
+
+| 读点 | 读数 |
+| --- | --- |
+| 岗位 | 库里第一条：`boss / 1001`（`jd.capture.run` 打本机仿站抓的） |
+| 三格 | 平台下拉选项 `["", "boss"]`、岗位 id 输入、文案文本域；填 `boss / 1001 / 你好，看到贵司在招前端，想聊聊` |
+| 待决单 | 1 → **0**（提交后卡片收掉） |
+| `usage_ledger` | 1 → **2**（新增行 `action=greet`、`target_id=1001`、`source=manual:1001`） |
+| `outbound_attempts` | 0 → **1**（`boss/1001/greet`、`status=succeeded`、`ledger_id=2`） |
+| 步行 | `ok`：「已向 boss 的 1001 发出打招呼（账本第 2 行 · 内容来源 manual）｜入参经人补充 1 轮，实际使用：{"request":{"platform":"boss","jobId":"1001","text":"…"}}」 |
+| run | `completed` / `COMPLETED` |
+
+这就是 `10.12-08` 剩下那条判据：**账本与 attempts 各恰增 1、且 `attempts.ledger_id` 指向新增那一行**。
+钉住的点：入参是**代码按格子组装**出来的嵌套对象，一次通过 schema；用户全程没写 JSON。
