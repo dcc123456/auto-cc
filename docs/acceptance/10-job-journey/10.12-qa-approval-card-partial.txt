@@ -1,0 +1,58 @@
+# 助手审批门禁：用**既有确定性桩**取到的读数（部分）+ 缺什么
+
+结论先说：**桩不用新写**（`planner` 默认就是 `stub`，现场被 `cordis.yml` 设成了 `llm`）；切回 stub 后
+外发步骤确实会**停在审批点**，拒绝与超时都拦住了、账本零增。但「批准 / 拒绝 / 叫停」三条**没有全取到**，
+缺口写在最后一节，不记成绿。
+
+环境：隔离树内容 `10360f7`、userData 副本 `/tmp/qa12-ud-del`、CDP 10410、`pack=fixture`（只打 `127.0.0.1:10233`）。
+
+## 一、桩的位置与怎么开（不用新增任何代码）
+
+```ts
+// packages/agent/src/loop/loop.ts:203
+planner: z.enum(['llm', 'stub']).default('stub'),
+```
+
+- **默认就是 `stub`**；`cordis.yml` 的 `agent-loop.config.planner: llm` 才是现场那个
+  `AGENT_PLANNER_REQUEST_FAILED：模型返回空回复` 的来源（因为没配 LLM）。
+- 打开方式：装配面板/配置口把 `agent-loop` 的 `planner` 改回 `stub` 即可（内存配置，重启复原）。
+  我这轮就是 `plugins.saveConfig('agent-loop', {...values, planner:'stub'})`，读回 `before:"llm" → after:"stub"`。
+- 桩认**逐字点名的工具 id**（`findNamedTools(goal, knownToolIds)`）：goal 里写 `outbound.greet.perform`
+  就出这一步；写自然语言（如「给这一屏的岗位打招呼」）得到的是**空计划**（`steps: []`）——这也是我第一次读数空计划的原因。
+
+## 二、取到的读数
+
+| 场景 | 读数 | 判 |
+| --- | --- | --- |
+| 桩起草（`propose('outbound.greet.perform')`） | `status:"proposed"`、`autonomy:"auto"`、`plan:[{tool:"outbound.greet.perform", effect:"outbound", requiresConfirmation:true}]` | 计划正确、标了「需人工批准」 |
+| 确认后无人表态 | run 落 `status:"failed"`、**`stopReason:"PAUSE_TIMEOUT"`**、`steps:1`（那一步是「失败：外发需人工批准」） | **未放行**、零外发 |
+| 点「放弃」（`pause-deny`） | 库里 `agent_run.stop_reason` = **`PAUSE_DENIED`**（两个 run：`cfff78c1…`、`6603cd86…`） | **拒绝生效**、零外发 |
+| 审批卡控件渲染 | `pause-deny`「放弃」**56×24 可见**；`stop-run`「叫停」在 DOM 里但 `0×0`；**`pause-approve` 在全自动档下不存在** | 部分渲染 |
+| 全过程账本 | `usage_ledger 13`、`outbound_attempts 7`、`delivery_records 0` —— 与审批前**完全一致** | 零外发 |
+
+## 三、缺什么（不记绿）
+
+1. **`pause-approve` 在全自动档不渲染**：三只控件里只有「放弃」可见、「叫停」隐藏、「批准」不存在。
+   要取批准那条，得把自治档切到**半自动**（菜单里有 `chat-autonomy-semi` / `chat-autonomy-suggest`），
+   但我这轮点 `chat-autonomy-toggle` 没把菜单打开（那三只在隐藏 DOM 里、可见性 0），所以没切成功。
+2. **「叫停」没点上**：`stop-run` 一直 `0×0`（在未激活的视图里），程序化点击对隐藏控件无效。
+3. **另有一条 run（`9d65e0b0…`）点了「放弃」后仍显示 `running`**，与另外两条落 `PAUSE_DENIED` 不一致 ——
+   这条要么是点击时视图刚切换、要么是暂停态与按钮之间有竞态。**这是缺口，不是通过**：需要补一次干净复现
+   （同一 runId 下「点放弃 → 5 秒内 `PAUSE_DENIED`」），否则「拒绝一定生效」这句话只说得出两条证据。
+
+## 四、下一步（给接手的人）
+
+- 先在悬浮助手里把自治档切到**半自动**（可见菜单点选，不要程序化点隐藏节点），再跑 `propose('outbound.greet.perform')`
+  → `confirm` → 这时应出现「批准 / 放弃 / 叫停」三只，各点一次并记 `agent_run.status` 与 `stop_reason`；
+- 「批准」后的预期：那一步会去执行 `outbound.greet.perform`，在 `pack=fixture` 下最多打到 `127.0.0.1:10233`；
+  若内核页面停在未登记源会得到 `WRITE_ORIGIN_UNREGISTERED`（这条已在 `10.12-07` 单独验过）。
+- 判据（沿用第 13 片）：**拒绝与叫停必须零外发**（账本三表零增）；**批准后才允许出现一次外发尝试**。
+
+## 复现命令
+
+```
+node cdp.mjs 10410 auto-cc /tmp/qa13-stub.mjs     # 切 planner=stub（读回 llm→stub）
+node cdp.mjs 10410 auto-cc /tmp/qa13-view.mjs     # propose 的完整视图（runId/autonomy/plan）
+node /private/tmp/qa-11/card4.mjs deny            # 不 await confirm、轮询可见控件、点「放弃」
+sqlite: SELECT id,status,stop_reason FROM agent_run ORDER BY created_at DESC LIMIT 3
+```
