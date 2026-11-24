@@ -1452,6 +1452,20 @@ interface JourneyContext {
 
 **R13-7（风险，P2，2026-11-24 登记）：将来出现第二个调用方会踩 150 秒阻塞。** 主进程 `confirm` 仍会等到整条循环（含最长 150 秒暂停窗）才返回终态；现在只有渲染层一条调用方且已非阻塞。触发条件：新增任何 `await agent.loop.confirm(...)` 的调用方（新界面、助手第二入口、脚本化流程）。处置：新调用方一律 fire-and-forget + 读 `agent.pause.pending`/`agent/run-progress`；若要长期消除，再单独立项改契约并重写那 65 个用例，不在本片做。
 
+**R13-10（红线事故，P0，2026-11-24 登记）：自动化访问真实招聘平台，且为 2026-11-21 同型事故复发。**
+
+**事实（不淡化）**：QA 在副本实例上跑 `jd.capture.run`，该副本 `platform-boss.pack` 回到默认 **`real`**（配置只在内存、新建实例回落到 `cordis.yml`）。`2026-11-24T05:44:48Z`（北京 13:44:48）内核视图导航 `https://www.zhipin.com/web/geek/jobs?query=前端&city=101020100` 并装载完成；`05:44:55Z` 批量抽取「容器 15 个 · 回传 12 行 · 帧 5/5」，`jd-capture-service` 入库 1 行；闸门放行并落账 `usage_ledger` 第 14 行 `action=search`（副本库，不在用户真实库）。更早 `05:30 / 05:31 / 05:33 / 05:37` 另有 4 次真实域名导航（`www.zhipin.com/`、`/job_detail/job-QA`、`/job_detail/job-QA2`）。
+
+**边界**：外发 0（无 `greet`/`deliver` 账行、`delivery_records` 空、attempt 仅 `unknown`/`in-flight`）；影响面仅副本库。
+
+**违规条款**：项目规则「自动化测试只访问本地仿站；真实平台只由用户本人在场手动验证，自动化永不访问真实招聘平台」。
+
+**为什么是复发而不是偶发**：2026-11-21 第 11 片取证期已有同型事故（§14.9 第 3 条：隔离实例打开真实 BOSS 验证页，只加载无动作、三表 0 行），当时的修法只在**脚本侧**（开 `fixture` + 断言 `kernelViewUrl` 是回环）。两轮根因同型——**pack 的默认值与调用入口不匹配**；上一轮没在产品侧加闸，所以换一个人、换一份副本就复发。**结论：脚本纪律不能替代产品闸。**
+
+**处置**：① QA 停手、污染副本 `/tmp/qa13-clean` 销毁、事故证据归档 `10.12-08-incident-real-site-access.txt`；② 开发加**产品级 fail-closed 闸**——自动化路径（`jd.capture.run`、批量抽取、执行器导航）发起前核对 `pack`，为 `real` 时一律拒绝并给 `REAL_PLATFORM_AUTOMATION_BLOCKED`（`details` 带 pack / 目标主机 / 动作），只有**人工在场的一次性显式授权**能解除；③ 所有取证脚本起手断言 `pack === 'fixture'` 且内核 host 是回环，否则中止——两道一起才算数；④ **闸门落地并取负对照前，`10.12-08` 的干净读数不取、第 13 片不收口**（spec 新增 10.12-10 挂该判据）。
+
+**责任人**：世界级开发程序员（产品闸）→ 刁钻的QA（负对照与干净读数）；PMO 复核事故证据。
+
 **R13-9（缺陷，P2，2026-11-24 登记，不阻塞第 13 片）：外发卡在页面等待时，`outbound_attempts` 停在 `in-flight` 且无人收尾。** 读数：QA 轮 1 新 attempt `id 8` 为 `status:'in-flight'`、`ledger_id:null`、run 仍 `running`（页面在等，尚未真发出）；用户叫停后这条 attempt **没有超时收尾**，会长期留在审计表里。危害：审计表出现永久性未终态行，「查不到回执的账行判对账异常」这条判据在它身上永远悬着，对账时会被当成异常笔。处置（二选一或并用）：① 给 `in-flight` 设超时——同一 attempt 超过 N 分钟无终态就置 `failed` 并写 `reason=TIMEOUT`；② 叫停/停止时把未终态的 attempt 一并收尾。排期：第 14 片带，不在本片阻塞；判据落地时另开 spec 条目。**与夹具缺口区分（2026-11-24）**：QA 两次 `job-QA`/`job-QA2` 停在 `in-flight` 是**仿站没有对应会话页**（无打招呼入口/发送键），属夹具缺口；R13-9 说的是**产品**在 in-flight 上缺少超时/叫停收尾。两件事分开登记、分开修。
 
 **第三形态（2026-11-24 补，QA 干净副本 `a27445e`）**：`attempts +1`、账本零增还有一种是 **`unknown` / `OUTBOUND_UNKNOWN_ERROR` 终态**——`ledger_id` null、run `failed`/`STEP_UNSUCCESSFUL`、`usage_denials` 0（不是闸门拒）。按「结果不可判定就不记账」的 fail-safe 设计，账本不增是**设计行为**；但它**不是成功**，必须走「先对账、不盲目重发」（10.6-07），对账时既不能当「还在跑」、更不能当「失败了可以重发」。该次 `unknown` 的**原因未定位**（可能与本例未先跑 `jd.capture.run` 的环境差异有关），QA 下轮先抓一次再走链对齐环境；若对齐后仍 `unknown`，由开发按执行层日志定位。
