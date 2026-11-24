@@ -1,0 +1,57 @@
+# 结构化补信息卡复验（`6d4c6fe`）：R13-8 的死路解除；「各恰增 1」的两种读数
+
+环境：隔离树 `git archive 6d4c6fe` + `main.cjs`/renderer 重打；副本 userData `/tmp/qa12-ud-del`；CDP 10410；
+`planner` 读回 **`stub`**、`chat['session.setAutonomy']('semi')`；内核视图在 `http://127.0.0.1:10233/chat?targetId=…`（只打本机仿站）。
+
+**测试前置（必须在证据里写明）**：先在**副本库**上做了一次 `sessions['grantConsent']('boss')`（返回 `platform:"boss"`）。
+开发自测时那一步停在 `TOOL_FAILED：平台 boss 还没有一份自动化风险确认记录` 就是缺这个前置——**这是闸门在拦，不是形状问题**。
+
+## 一、结构化卡：三格渲染、一次过 schema（R13-8 死路解除）
+
+工具侧声明（`agent.tools.list()` 读到的 `supply`）：
+
+| 字段路径 | 控件 | 说明 |
+| --- | --- | --- |
+| `request.platform` | `select`（`optionsFrom:"platforms"`） | 下拉取已知平台 |
+| `request.jobId` | `text`（`optional:true`） | 可选 |
+| `request.text` | `textarea` | 必填 |
+
+补信息卡实渲染（`data-testid` 逐字）：
+
+- `agent-pause-supply-input-platform`（SELECT）
+- `agent-pause-supply-input-jobId`（INPUT）
+- `agent-pause-supply-input-text`（TEXTAREA）
+
+填三格 → 点「提交」→ 卡片原文变「**补充信息单已按你的表态收掉（第 1 轮）· 提交补充信息：成功**」、待决单 **1 → 0**、卡片消失。
+面板给出的实际入参原文：
+
+```
+入参经人补充 1 轮，实际使用：{"request":{"platform":"boss","jobId":"job-B","text":"你好，看到贵司在招前端，想聊聊"}}
+```
+
+**一次通过 schema，没有再出现 `Unrecognized key`** —— 「人无法完成审批链」这条死路解除，R13-8 的处置有效。
+
+## 二、「账本与 attempts 各恰增 1」：两轮读数，都不是失败、也都不算过
+
+| 轮 | 目标 | `ledger` | `attempts` | 观察 |
+| --- | --- | --- | --- | --- |
+| 1 | `job-QA` | 13 → **13** | 7 → **8** | 新 attempt `id 8`，`status:"in-flight"`、`ledger_id:null`、run 仍 `running` —— **页面在等**，这一步还没真正发出；我随后把该 run 叫停 |
+| 2 | `job-B` | 13 → **13** | 8 → **8** | **零增**：`boss\|job-B\|greet\|unversioned` 这个四元组**之前已成功发过**（attempt #7、ledger 第 13 行），被去重闸门拦住——这正是重放判据在起作用，不是缺陷 |
+
+- 所以「各恰增 1」这条**目前没有一次干净的读数**：一次卡在页面等待（`in-flight`），一次撞在四元组去重上。
+- 要拿到干净读数，需要一个**从未发过的新目标**且仿站页面上有它（下一轮用新 targetId 重跑即可，不需改产品）。
+- 两轮的共同点：**结构化卡本身没有拖后腿**——入参一次过 schema、待决单正常收掉、账本没有被误记。
+
+## 三、结论
+
+- **R13-8（结构化补信息卡）**：通过（三格渲染、一次过 schema、无 `Unrecognized key`）。
+- **批准链「各恰增 1」**：仍未取到干净读数（一次 in-flight 卡页面、一次撞去重），下次换全新 targetId 复跑。
+- 前置 `sessions.grantConsent('boss')` 已写明，避免下一个人以为库里天生有这条同意记录。
+
+## 复现命令
+
+```
+node /private/tmp/qa-11/rinspect.mjs          # 读 tools.list 的 supply 三格 + session 形状
+node /private/tmp/qa-11/chain2.mjs            # /plan → 确认 → 批准 → 填三格 → 提交（含 DB 前后计数）
+sqlite: SELECT id,status,reason,ledger_id FROM outbound_attempts ORDER BY id DESC LIMIT 1
+```
