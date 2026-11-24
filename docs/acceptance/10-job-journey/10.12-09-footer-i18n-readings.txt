@@ -1,0 +1,34 @@
+# 10.12-09 footer 双语身份不截的 QA 独立复跑
+
+- 日期：2026-11-24
+- 复核人：刁钻的QA（独立实例，只打本地仿站；未碰真站）
+- 构建：`31e6076`（隔离树 `/private/tmp/qa-11/tree` 由 `git archive` 重建的主进程 + 渲染层产物）
+- 实例：`--remote-debugging-port=10413`、`--user-data-dir=/private/tmp/qa13-footer-ud`（从既有副本库拷来，只为让岗位卡有数据；本项是界面读数，不发起任何外发）
+- 目标岗位：`jobId=1001`（「桌面端前端工程师（Electron）· 星桥科技」，由本地仿站抓取入库的夹具岗位）
+- 判据（设计师裁定）：**说明可截、岗位身份不可截**；含 en 下中文岗位名也必须完整
+
+## 一、DOM 读数（`[data-testid=jd-action-target]` 两个子 span）
+
+| 语言 | footer 高 | 说明段 `scrollWidth/clientWidth` | 说明段是否截 | 身份段 `scrollWidth/clientWidth` | 身份段是否截 | 身份段原文 |
+| --- | --- | --- | --- | --- | --- | --- |
+| zh-CN | **55** | 154 / 154 | 否 | **209 / 209** | **否** | 桌面端前端工程师（Electron） · 星桥科技 |
+| en | **55** | 215 / 75 | 是（`text-overflow: ellipsis`，画面显示 `Every action…`） | **209 / 209** | **否** | 桌面端前端工程师（Electron） · 星桥科技 |
+
+- 两语 footer 高度都是 **55**，切语言不改变条高。
+- 说明段 `flex-shrink: 1`（可压缩、按设计截），身份段 `flex-shrink: 0`（不参与压缩）——与代码 `JobLabPanel.tsx` 的两段注释与 class 一致。
+- en 下容器宽度从 zh 的 402 降到 **293**（四只英文按钮更宽），说明段被压到 75px 并出省略号；**身份段仍 209/209 完整**，中文岗位名与公司名一字不少。
+- 段容器本身 `scrollWidth == clientWidth`（zh 402/402、en 293/293），没有溢出到按钮上。
+
+## 二、截图证据（两语各一张，均为证据区裁剪，非整窗）
+
+| 文件 | md5 | 尺寸 | 画面 |
+| --- | --- | --- | --- |
+| `10.12-09-footer-zh-qa.png` | `bfc703348aaafaf8a8c64008f50bc544` | 3832×220 | 删除岗位 ｜ 本行每个动作只作用于这一行： 桌面端前端工程师（Electron） · 星桥科技 ｜ 在浏览器打开 · 用这份 JD 生成简历 · 打招呼 · 投递简历 |
+| `10.12-09-footer-en-qa.png` | `07a2afbccc0ce2aa15f11ed3bb2e29b3` | 3832×220 | Delete job ｜ Every action… 桌面端前端工程师（Electron） · 星桥科技 ｜ Open in browser · Generate resume from this JD · Greet · Deliver resume |
+
+- 两张 md5 **互异**，且都只截 footer 那一条（`Page.captureScreenshot` + `clip`，scale 2），不含桌面、其他窗口、侧栏与列表。
+- 图像脱敏：画面里只有动作按钮文案、说明句、夹具岗位名与公司名（星桥科技），**无姓名 / 手机号 / 邮箱 / 证件号 / 头像 / 简历正文**；岗位名与公司名来自本地仿站夹具，不是真实招聘方数据。
+
+## 三、结论
+
+`10.12-09` 的「footer 双语身份不截」在最终候选 HEAD 上由 QA 独立复跑通过：说明按设计可截、身份在两语下都完整不截（含 en 下中文岗位名），footer 高两语一致 55，两张证据图互异且已脱敏。产品代码未变，其余活体读数（首启 22 只、批准链各恰增 1、自动化闸两条负对照）与四门禁（2854 例）继续有效，不重跑。
