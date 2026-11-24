@@ -1,0 +1,57 @@
+# 审批卡三条动作用**界面 `/plan` 路径**取到了（本轮 HEAD `a4da993` 之上，`aacc2ee` 含拆 span）
+
+前提（两条都按开发给的说法就位）：
+
+- `agent-loop.planner`：`readConfig` 读回 **`stub`**（`before:"llm" → after:"stub"`）；
+- 自治档：`chat['session.setAutonomy']('semi')` 返回 **`true`**，`chat['session.current']()` 读回 **`autonomy:"semi"`**；
+- 入口：**界面 `/plan` 路径**（悬浮助手输入框填 `/plan outbound.greet.perform {"jobId":2}` → 点可见的
+  `[data-action=send]`，第 3 只 32×32 才是可见的那一只；前两只是 0×0）。桥接口直接 `propose` 起的 run，
+  `stop-run` 是空操作（开发已说明：`runIdRef` 只在界面流程里赋值）。
+
+## 一、三只控件：都渲染（semi 档 + 界面路径）
+
+| 控件 | 读数 |
+| --- | --- |
+| `pause-approve` | **57×24**，文案「批准」 |
+| `pause-deny` | **56×24**，文案「拒绝」 |
+| `stop-run` | **66×30**，文案「叫停」 |
+
+面板原文（节选）：「第 1 步 发送打招呼 **未开始** outbound.greet.perform … **外发** **需人工批准**」。
+
+## 二、三条动作各一次
+
+| 动作 | 点击后读数 | 账本 |
+| --- | --- | --- |
+| **批准** | 按钮消失、run 继续跑到第 1 步；该步因**缺参数**进入「补信息」卡（`agent-pause-supply` 输入框在），**没有自动补参、也没有外发** | `ledger 13 / attempts 7 / deliveries 0`（零增） |
+| **拒绝** | 点击成功，但 **8 秒内未落定**（`not-settled`，run 未到 `failed/stopped/done`） | 零增（同上） |
+| **叫停** | 点击成功，同样 **8 秒内未落定** | 零增（同上） |
+
+- 三条动作的**账本都是 13/7/0，与开始前完全一致** → 没有任何外发发生。
+- 「批准后是否只出现一次外发尝试」这一条**没验到意义**：批准后卡在「缺信息」，闸门链继续挡着，所以是 0 次而不是 1 次；
+  要验「恰一次」，得给一步带全参数的外发（现有 stub 只按点名的工具 id 出步，不产参数）。
+
+## 三、当场复现了管理员判的 D1 / D2
+
+| 缺陷 | 我的独立读数 |
+| --- | --- |
+| **D1 全自动/某些 run 没有批准出口** | 起的两条 run 里，**一条的卡上 `pause-approve` 不存在**（只看到拒绝 + 叫停，`controls.approve:false`）——与「semi 档才出批准键」的说法一致；也就是说档位与卡面不一致时用户确实没有批准出口 |
+| **D2 点拒绝后仍停在 running** | 点 `pause-deny` 后 8 秒轮询（200ms × 40）仍未落定（`not-settled`），另有一条早前 run（`9d65e0b0…`）也是点了放弃仍 `running` |
+| **叫停也没很快落定** | 点 `stop-run` 后 8 秒同样 `not-settled` |
+
+这三条与管理员的判定一致，**我不把它们记成通过**；修复构建到了之后按「拒绝/叫停 5 秒内必须落定」重取。
+
+## 四、结论
+
+- 三只控件在 semi 档、走界面 `/plan` 路径**确实都渲染**（57×24 / 56×24 / 66×30）；
+- 三条动作**零外发**（账本三次读都是 13/7/0）；
+- 但**「落定」不达标**：拒绝与叫停 8 秒内都没落到终态；且存在 run 没有批准键 —— D1/D2 仍成立。
+
+## 复现命令
+
+```
+node cdp.mjs 10410 auto-cc /tmp/qa13-setup.mjs     # planner=stub + autonomy=semi
+node /private/tmp/qa-11/plan1.mjs                  # 界面 /plan 发出命令 → 计划卡（确认控件、面板原文）
+node cdp.mjs 10410 auto-cc /tmp/qa13-card6.mjs     # 三只控件可见性与尺寸
+node /private/tmp/qa-11/click-approve.mjs          # 批准 → 读面板与账本
+node /private/tmp/qa-11/deny-stop.mjs              # 拒绝 / 叫停 → 8 秒落定轮询 + 账本
+```
