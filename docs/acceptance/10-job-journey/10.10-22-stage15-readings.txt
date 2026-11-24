@@ -91,3 +91,15 @@
 
 真包冒烟（`--cdp-port 10431`）→ **SMOKE_EXIT=0**，六步全过（22 只工具、助手开合、fixture guard、回环内核、
 `boss-basic` done、岗位卡与弹窗、干净退出）。
+
+## QA 的 P3 修复：粘贴过短不再宣称「已导入并同步」
+
+QA 读数：粘贴 69 字 → 服务回 `text-too-short`（69/100）、`resume_docs` 仍 0、`kb_entities` 0，
+但界面同时出现「简历已导入并同步到知识库」与「库里还没有简历」——「已同步」与事实不符。
+
+修法：`ResumeDesk` 的完成提示按回执分支——`status==='scanned'` 时改成
+「这段文字只有 N 字，没建成简历（太短…）；补全后再点一次」，且不提同步；只有 `imported` 才说已导入并同步。
+`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 全绿（2858 例）。
+
+**未重新出包**：萌新正在用 `128f025e…` 计时，重打会让他的读数再次作废。这条文案修复已在 HEAD，
+下一次出包生效；如现场要求即时生效，再重打并把新指纹替换掉本节。

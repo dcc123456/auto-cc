@@ -1054,7 +1054,8 @@
       "pasteSubmit": "导入这段文字",
       "pasteCancel": "先不收起草稿",
       "pasteEmpty": "先粘贴简历正文",
-      "generateNoDocs": "还没有可定制的简历：先粘贴正文或使用虚构样例"
+      "generateNoDocs": "还没有可定制的简历：先粘贴正文或使用虚构样例",
+      "pasteTooShort": "这段文字只有 {{chars}} 字，没建成简历（太短，缺姓名或经历等关键内容）；补全后再点一次"
     },
     "shelf": {
       "heading": "模板架",

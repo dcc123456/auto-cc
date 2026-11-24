@@ -474,7 +474,10 @@ export function ResumeDesk() {
           setPasteText('');
           setPasteOpen(false);
         },
-        describe: () => t('resume.pasteDone'),
+        // 回执说什么就说什么：内容过短时服务回 `scanned`（不建工作副本），此时说「已导入并同步到知识库」
+        // 就是一句谎话——QA 的 P3 正是这条。过短时改成「没建成，补全后重试」，且不提同步。
+        describe: (value) =>
+          value.status === 'scanned' ? t('resume.pasteTooShort', { chars: value.textLength }) : t('resume.pasteDone'),
         onError: setImportError,
       },
     );

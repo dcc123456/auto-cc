@@ -1054,7 +1054,8 @@
       "pasteSubmit": "Import this text",
       "pasteCancel": "Keep draft for now",
       "pasteEmpty": "Paste the resume body first",
-      "generateNoDocs": "No resume to tailor yet: paste text or use the fictional sample first"
+      "generateNoDocs": "No resume to tailor yet: paste text or use the fictional sample first",
+      "pasteTooShort": "That text is only {{chars}} characters, so no resume was created (too short: name or experience missing). Complete it and try again"
     },
     "shelf": {
       "heading": "Template shelf",
