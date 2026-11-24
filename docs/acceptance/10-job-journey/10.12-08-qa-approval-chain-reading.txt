@@ -85,3 +85,24 @@ no such table: llm_providers
 1. 本文件读数取自 `c9b121f`；冷启动修复与闸门重构（`7102a19` / `b3589e9` 及后续）落地后，需在**全新空库首启**上复跑：首启工具表 22 只、首启即走通本文件第二节、重放零增。
 2. 闸的三条负对照（`pack=real` 自动化挂载/导航被 `REAL_PLATFORM_AUTOMATION_BLOCKED`、主进程直调 `…FromUser` 得 `INVALID_ARGUMENT`）尚未在本文件记录，等最终构建后补。
 3. 最终 HEAD 四门禁独立复跑读数同样待补。
+
+## 六、闸的三条负对照（构建 `a32a3d1`，产物内实测 `REAL_PLATFORM_AUTOMATION_BLOCKED` ×2 / `assertUserCall` ×5）
+
+实例：`--remote-debugging-port=10412`、`--user-data-dir=/private/tmp/qa13-gate-ud`（全新空目录，无任何登录态），装配默认 `pack=real`（读数：`{"pack":"real"}`）。
+
+| 动作（自动化口） | 结果 | details | 内核视图 |
+| --- | --- | --- | --- |
+| `sessions.open('boss')` | `REAL_PLATFORM_AUTOMATION_BLOCKED` | `{pack:"boss", host:"www.zhipin.com", action:"mount"}` | 仍是 placeholder `data:text/html…`，未挂载 |
+| `browser.page.navigate('https://www.zhipin.com/web/geek/jobs')` | `REAL_PLATFORM_AUTOMATION_BLOCKED` | `{url:"https://www.zhipin.com/web/geek/jobs", host:"www.zhipin.com"}` | 同上，未导航 |
+
+账本前后：`usage_ledger 0 / outbound_attempts 0 / delivery_records 0` → **不变**。
+
+「伪造来源这条路必须死」的读数（没有网关标的主进程调用）：`packages/browser/src/page-service.test.ts:219` 的用例「人给的地址那只口在没有网关标时结构化拒绝（主进程自动化路径借不到它）」断言 `navigateFromUser` 拒绝码 `INVALID_ARGUMENT`；与 `packages/core/src/call-origin.test.ts` 一起跑：`Test Files 2 passed / Tests 26 passed`，`TEST_EXIT=0`。
+
+## 七、真站接触事故（QA 本人，2026-11-24 14:31 前后）
+
+- 事实：为核「渲染层这一路确实是人」，我在同一 `pack=real` 实例上从渲染层 eval 调了 `sessions.openFromUser('boss')`。网关按设计把渲染层调用标成 user，于是放行，内核视图挂载 `https://www.zhipin.com/web/passport/zp/verify.html?callbackUrl=https%3A%2F%2Fwww.zhipin.com%2F`（真站登录/安全验证页）。
+- 边界：**外发 0**（`usage_ledger` / `outbound_attempts` / `delivery_records` 全 0，`conversation_messages` 0）、**无登录态**（全新空 userData，无 cookie）、无抓取、无入库。接触点 1 个：一次会话挂载到真站验证页。
+- 定性：**不是闸的缺陷**。闸拦的是自动化口（`sessions.open` / `browser.page.navigate`），两条都拦住了；`…FromUser` 按设计只认渲染层，而 CDP 直连渲染层等同于「人自己点」。这条是我取证方法越界，不是产品漏。
+- 纪律修正（即刻生效）：取证脚本**禁止调用任何 `…FromUser` 口**；`pack=real` 的负对照只许调自动化口。人那一路的「放行」不再用真站验，只留单测与代码读数为凭。
+- 处置：实例当场停（`curl :10412` → `000`），该 userData 不再使用。
