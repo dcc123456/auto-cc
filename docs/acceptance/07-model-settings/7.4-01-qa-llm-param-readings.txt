@@ -33,3 +33,33 @@
 
 - 端点是我自己起的严格 mock（`tmp/qa13/llm-strict-mock.mjs`），不访问任何真实终端；`/records` 里 `authorization` 已脱敏成 `Bearer…(N chars)`，可核对「头到位」而不落明文。
 - 全程只读应用侧接口 + 写「本机 mock 的提供商实例」，未发生任何真实平台外发；实例与 mock 用完即停。
+
+## 五、补判（构建 `7fec6b3`，dmg `157803077 B / e77c8666…`、asar `14789cc1…`，工作树干净）
+
+实例 `--remote-debugging-port=10510`、`--user-data-dir=/private/tmp/qa31-ud`（全新）；mock 仍是 `tmp/qa13/llm-strict-mock.mjs`（`127.0.0.1:10455`）。实例：`temperature:null`、`maxTokens:1234`、`reasoningEffort:'high'`、自定义头 `x-client-token` + `x-mock-mode`。
+
+### ① 真实对话口的 `max_tokens` 与实例同值：**过**
+
+绑定 chat 后执行 `chat.session.send('你好')`（走 `llm.chat.complete`，无探测覆盖），mock `/records` 收到：
+
+```
+{"model":"strict-demo","temperature":"(absent)","max_tokens":1234,"reasoning_effort":"high","x-client-token":"sekret-header-abc123","checks":[{"verdict":"accept","temperaturePresent":false,"effort":"high"}]}
+```
+
+三样一次对齐：`max_tokens` **1234 = 实例值**（不是探测口的 8）、`temperature` **缺席**、`reasoning_effort` **按实例出现**；自定义头也在。
+
+### ② `request_id` 三种落点：**过（附一条小瑕疵）**
+
+用 `checkProvider` + 温度 0.7 触发 400，切换 `x-mock-mode` 让对端把 id 放不同位置：
+
+| 对端落点 | 透出原文 | 判 |
+| --- | --- | --- |
+| body（`error.request_id`） | 「对端返回 400：temperature only 1 is allowed for this model**（request id: mock-400-body）**。提示：…把这一家的「温度」设成「不发送」再试一次」 | 过 |
+| 响应头（`x-request-id`） | 同上，括号里是 **mock-400-header** | 过 |
+| 两边都没有 | 同一句，但**括号整段不出现**（不编造 id） | 过（薄） |
+
+**小瑕疵（P3，不拦收口）**：两边都没有时，文案没有明写「对端未给」，只是省掉了括号。判据原话是「取不到就如实写『对端未给』」——建议补三个字，避免读者以为是客户端没打印。
+
+### 结论
+
+此前记「未验证」的 `max_tokens` 与「部分过」的 `request_id`，在这一份上**都补齐**：四格 + 两条附加（保存与探测分离、400 可照做）全部成立，仅剩上面那条 P3 文案建议。
