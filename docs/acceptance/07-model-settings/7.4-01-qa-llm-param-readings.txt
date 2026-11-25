@@ -63,3 +63,16 @@
 ### 结论
 
 此前记「未验证」的 `max_tokens` 与「部分过」的 `request_id`，在这一份上**都补齐**：四格 + 两条附加（保存与探测分离、400 可照做）全部成立，仅剩上面那条 P3 文案建议。
+
+## 六、P3 复查（构建 `2c9e186`，dmg `157803126 B / 20ecfb1c…`、asar `f6e4fb30…`，工作树干净）
+
+实例 `--remote-debugging-port=10520`、`--user-data-dir=/private/tmp/qa32-ud`；mock 同前，实例头加 `x-mock-mode: none`、温度 0.7 触发 400：
+
+```
+reason:  LLM_REQUEST_FAILED
+message: 对端返回 400：temperature only 1 is allowed for this model（对端未给 request id）。提示：该模型可能只接受某个固定温度（常见是 1），把这一家的「温度」设成「不发送」再试一次
+```
+
+「（对端未给 request id）」明确写在原文里，不再是省掉括号。至此 `request_id` 三个落点（body / 响应头 / 两边都没有）全部有读数，7.4 这一片 QA 侧**全绿**，无遗留。
+
+（另：`smoke:dist` 的「干净退出卡 15 秒」按管理员裁定为发布前必须清掉的红项，由开发三步法排查；本次未把它计入 7.4 的判据。）
