@@ -1,0 +1,35 @@
+# 7.4 QA 读数：模型接入参数可选发送（严格 mock 实测）
+
+- 日期：2026-11-25
+- 复验人：刁钻的QA
+- 构建：HEAD `d9abc11cd12478965879231a6dbde0595ca7a766`、dmg `157802799 B / 2fccb3aed1e3861f…`、asar `364e1bcdf6d5fa0e…`、工作树 `git status --porcelain` = 0
+- 实例：`--remote-debugging-port=10500`、`--user-data-dir=/private/tmp/qa29-ud`（全新，未预置任何提供商）
+- 端点：`tmp/qa13/llm-strict-mock.mjs`，只监听 `127.0.0.1:10455`；规则写死「temperature 出现就必须是 1」「必须带 `x-client-token`」「`reasoning_effort` 只认 low/medium/high」「`max_tokens` 必须是正整数」，并把每次请求的 body 与（脱敏后的）headers 记进 `/records`
+- 操作方式：走桥接口 `llm.settings.saveProvider / fetchModels / addModels / checkProvider`（等价于界面那四个字段，且能拿到原始回包）；未在真站、未外发任何真实平台请求
+
+## 一、四格判据
+
+| # | 判据 | 读数 | 结论 |
+| --- | --- | --- | --- |
+| 1 | 温度「不发送」时字段**缺席** | 实例 `temperature: null`；mock `/records` 的 body：`hasTemperature=false`（`temperature` 键整个不存在），请求 200 | **过** |
+| 2 | 自定义请求头到位 | mock 收到 `x-client-token: sekret-header-abc123`；`saveProvider` 回包 `headerNames:["x-client-token"]`（只回名字） | **过** |
+| 3 | 请求头值**不落明文** | 应用日志 `grep -c "sekret-header-abc123" /private/tmp/qa-11/qa29.log` → **0** | **过** |
+| 4 | `reasoning_effort` 只按配置出现 | 配置 `null` → body 无该键；配置 `high` → body `reasoning_effort:"high"`、mock `accept` | **过** |
+| 5 | `max_tokens` 与界面同值 | 实例设 `maxTokens:1234`，但探测请求 body 是 `max_tokens:8` | **未验证**：连通性探测自带小覆盖值（省 token 的探针），这条只能在**真实生成路径**上验；需开发指明哪条调用吃实例值 |
+
+## 二、两条附加
+
+| # | 判据 | 读数 | 结论 |
+| --- | --- | --- | --- |
+| 6 | 探测失败时模型仍能保存 | 存一个 `baseUrl=http://127.0.0.1:1/v1`（不可达）的实例：`saveProvider` 直接成功（`saved:true`，id `190994f5…`），`listProviders` 里仍在；随后探测才失败（`LLM_UNAVAILABLE`） | **过**（保存与探测已分离） |
+| 7 | 400 提示人能照着做 | 温度设 0.7 → mock 回 400 → 回包原文：「对端返回 400：temperature only 1 is allowed for this model。提示：该模型可能只接受某个固定温度（常见是 1），把这一家的「温度」设成「不发送」再试一次」 | **部分过**：原文 + 可执行提示都有，但 **mock 返回的 `request_id` 没有出现在透出文本里**（详见下） |
+
+## 三、要开发确认的两点
+
+1. **`request_id` 没透出**：mock 的 400 响应体里带了 `request_id:"mock-400"`，但界面/回包文本只显示到「…再试一次」，没有 request id。若「错误透出 = 状态码 + 原文 + 对端 request id」是既定判据，这一格不成立。
+2. **`max_tokens` 同值只在真实生成路径可验**：探测口固定发 `max_tokens:8`（合理），所以「与界面同值」要么由开发指出一条吃实例值的调用（例如某次真实生成），要么由单测钉住；我这边按未验证记，不替它判过。
+
+## 四、方法说明
+
+- 端点是我自己起的严格 mock（`tmp/qa13/llm-strict-mock.mjs`），不访问任何真实终端；`/records` 里 `authorization` 已脱敏成 `Bearer…(N chars)`，可核对「头到位」而不落明文。
+- 全程只读应用侧接口 + 写「本机 mock 的提供商实例」，未发生任何真实平台外发；实例与 mock 用完即停。
