@@ -6,6 +6,14 @@ import { DeskButton, DeskCheck, DeskField, DeskSelect, Tag, deskReason } from '.
 import type { ModelsData } from './useModelsData';
 import { encodeCandidate, providerKey, storedModelsOf } from './useModelsData';
 
+/**
+ * 采样与思考的三格读数：`none` = **不发送这个字段**（2026-11-25 用户裁定）。
+ *
+ * 「不发送」必须是一档显式状态，不能靠留空表示：留空在输入框里和「还没填」分不开，
+ * 而这两件事在严格端点上的结果完全不同（一个 200、一个 400）。
+ */
+type TuningMode = 'none' | 'value';
+
 /** 新增/编辑实例的草稿：只装人敲过的那一份，切走即整份撤掉。 */
 interface ProviderDraft {
   /** 选中的端点变体 id；预设没有变体时为空串 */
@@ -14,6 +22,19 @@ interface ProviderDraft {
   baseUrl: string;
   /** 明文 key 草稿：空串＝不动已存的那把，且永不回填 */
   keyDraft: string;
+  /** 温度：`none` = 不发送；`value` 时读 `temperatureDraft`（0–2） */
+  temperatureMode: TuningMode;
+  temperatureDraft: string;
+  /** 最大 token：同上，`value` 时读 `maxTokensDraft`（正整数） */
+  maxTokensMode: TuningMode;
+  maxTokensDraft: string;
+  /** 思考强度：`none` = 不发送，否则是那一档枚举 */
+  reasoningEffort: 'none' | 'low' | 'medium' | 'high';
+  /**
+   * 自定义头草稿。**只在人按过「编辑请求头」之后才提交**（`headersEditing`），
+   * 否则一次无关的保存会把已存的一组头整体清掉——那是不可恢复的误删。
+   */
+  headers: Array<{ name: string; value: string }>;
 }
 
 export interface ModelProviderPaneProps {
@@ -69,7 +90,16 @@ export function ModelProviderPane({
     label: instance?.label ?? newLabel,
     baseUrl: instance?.baseUrl ?? preset?.baseUrl ?? '',
     keyDraft: '',
+    temperatureMode: instance?.temperature === null || instance?.temperature === undefined ? 'none' : 'value',
+    temperatureDraft:
+      instance?.temperature === null || instance?.temperature === undefined ? '' : String(instance.temperature),
+    maxTokensMode: instance?.maxTokens === null || instance?.maxTokens === undefined ? 'none' : 'value',
+    maxTokensDraft: instance?.maxTokens === null || instance?.maxTokens === undefined ? '' : String(instance.maxTokens),
+    reasoningEffort: instance?.reasoningEffort ?? 'none',
+    headers: [],
   }));
+  /** 人按过「编辑请求头」没有：没有就不提交 `headers`（省略 = 不动已存的那组）。 */
+  const [headersEditing, setHeadersEditing] = useState(false);
   const [candidates, setCandidates] = useState<string[]>();
   const [ticked, setTicked] = useState<string[]>([]);
   const [manualModel, setManualModel] = useState('');
@@ -78,6 +108,20 @@ export function ModelProviderPane({
 
   const { dead } = deskReason(t, 'settings.model', data.busy ? 'ACTION_BUSY' : undefined);
   const bridgeDead = dead(bridge ? undefined : 'BRIDGE_MISSING').disabledReason;
+  /** 温度的合法读法：0–2 的有限数（`none` 档不校验）。 */
+  const temperatureValid =
+    draft.temperatureMode === 'none' ||
+    (Number.isFinite(Number(draft.temperatureDraft)) &&
+      draft.temperatureDraft.trim() !== '' &&
+      Number(draft.temperatureDraft) >= 0 &&
+      Number(draft.temperatureDraft) <= 2);
+  /** 最大 token 的合法读法：正整数（`none` 档不校验）。 */
+  const maxTokensValid =
+    draft.maxTokensMode === 'none' ||
+    (Number.isInteger(Number(draft.maxTokensDraft)) &&
+      draft.maxTokensDraft.trim() !== '' &&
+      Number(draft.maxTokensDraft) >= 1);
+  const tuningValid = temperatureValid && maxTokensValid;
 
   /** 这条模型正被哪几条通道绑着；空数组表示可以移出。 */
   const boundLegsOf = (model: string): LlmLegName[] =>
@@ -122,11 +166,24 @@ export function ModelProviderPane({
           label: trimmedLabel,
           baseUrl: trimmedBaseUrl,
           ...(trimmedKey === '' ? {} : { apiKey: trimmedKey }),
+          // 三格都显式交三态：`null` = 不发送（严格端点靠这一档才通）。
+          temperature: draft.temperatureMode === 'none' ? null : Number(draft.temperatureDraft),
+          maxTokens: draft.maxTokensMode === 'none' ? null : Number(draft.maxTokensDraft),
+          reasoningEffort: draft.reasoningEffort === 'none' ? null : draft.reasoningEffort,
+          // 头只在人动过编辑器时才交：省略 = 不动已存的那组（避免无关保存清空）。
+          ...(headersEditing
+            ? {
+                headers: draft.headers
+                  .map((row) => ({ name: row.name.trim(), value: row.value }))
+                  .filter((row) => row.name !== '' && row.value !== ''),
+              }
+            : {}),
         }),
       {
         apply: (row) => {
           savedId = row.id;
-          setDraft((current) => ({ ...current, keyDraft: '' }));
+          setHeadersEditing(false);
+          setDraft((current) => ({ ...current, keyDraft: '', headers: [] }));
         },
         describe: () => t('models.panel.saved', { label: trimmedLabel }),
       },
@@ -330,6 +387,160 @@ export function ModelProviderPane({
             className="min-w-0"
           />
         </label>
+        {/* 采样与思考（2026-11-25 用户裁定）：每一格都有「不发送」这一档，因为严格端点
+            只接受固定温度，塞任何值都会 400。`none` 就是字段整个不出现在请求体里。 */}
+        <div
+          className="grid grid-cols-1 gap-2 rounded-md border border-line bg-ink-900/40 p-2 sm:col-span-2 sm:grid-cols-3"
+          data-testid="settings-model-tuning"
+        >
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-slate-400">{t('settings.model.temperatureLabel')}</span>
+            <DeskSelect
+              action="settings-model-temperature-mode"
+              value={draft.temperatureMode}
+              onValueChange={(value) => setDraft({ ...draft, temperatureMode: value as TuningMode })}
+            >
+              <option value="none">{t('settings.model.tuningNone')}</option>
+              <option value="value">{t('settings.model.tuningValue')}</option>
+            </DeskSelect>
+            {draft.temperatureMode === 'value' ? (
+              <DeskField
+                action="settings-model-temperature"
+                value={draft.temperatureDraft}
+                onValueChange={(value) => setDraft({ ...draft, temperatureDraft: value })}
+                isInvalid={!temperatureValid}
+                placeholder={t('settings.model.temperaturePlaceholder')}
+              />
+            ) : null}
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-slate-400">{t('settings.model.maxTokensLabel')}</span>
+            <DeskSelect
+              action="settings-model-maxtokens-mode"
+              value={draft.maxTokensMode}
+              onValueChange={(value) => setDraft({ ...draft, maxTokensMode: value as TuningMode })}
+            >
+              <option value="none">{t('settings.model.tuningNone')}</option>
+              <option value="value">{t('settings.model.tuningValue')}</option>
+            </DeskSelect>
+            {draft.maxTokensMode === 'value' ? (
+              <DeskField
+                action="settings-model-maxtokens"
+                value={draft.maxTokensDraft}
+                onValueChange={(value) => setDraft({ ...draft, maxTokensDraft: value })}
+                isInvalid={!maxTokensValid}
+                placeholder={t('settings.model.maxTokensPlaceholder')}
+              />
+            ) : null}
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-slate-400">{t('settings.model.reasoningLabel')}</span>
+            <DeskSelect
+              action="settings-model-reasoning"
+              value={draft.reasoningEffort}
+              onValueChange={(value) =>
+                setDraft({ ...draft, reasoningEffort: value as ProviderDraft['reasoningEffort'] })
+              }
+            >
+              <option value="none">{t('settings.model.tuningNone')}</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+            </DeskSelect>
+          </label>
+          {tuningValid ? null : (
+            <p className="text-[11px] text-amber sm:col-span-3" data-testid="models-tuning-reason">
+              {t('settings.model.tuningInvalid')}
+            </p>
+          )}
+        </div>
+
+        {/* 自定义请求头：值按密钥级数据对待，所以界面只回名字，改值必须重填（见 providerView 的注释）。 */}
+        <div
+          className="rounded-md border border-line bg-ink-900/40 p-2 sm:col-span-2"
+          data-testid="settings-model-headers"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] text-slate-400">{t('settings.model.headersHeading')}</span>
+            <span className="min-w-0 flex-1 text-[10px] text-slate-500" data-testid="settings-model-header-names">
+              {instance === undefined || instance.headerNames.length === 0
+                ? t('settings.model.headersNone')
+                : t('settings.model.headersStored', { names: instance.headerNames.join(', ') })}
+            </span>
+            <DeskButton
+              action="settings-model-headers-edit"
+              variant="line"
+              compact
+              onClick={() => {
+                setHeadersEditing((current) => !current);
+                setDraft((current) => ({
+                  ...current,
+                  // 进入编辑时把已存的名字预填进来（值永远拿不到，空串占位）：留空的行保存时会被删掉。
+                  headers:
+                    current.headers.length > 0
+                      ? current.headers
+                      : (instance?.headerNames ?? []).map((name) => ({ name, value: '' })),
+                }));
+              }}
+            >
+              {headersEditing ? t('settings.model.headersCancel') : t('settings.model.headersEdit')}
+            </DeskButton>
+          </div>
+          {headersEditing ? (
+            <div className="mt-1 flex flex-col gap-1">
+              {draft.headers.map((header, index) => (
+                <div className="flex flex-wrap items-center gap-1" key={`header-${String(index)}`}>
+                  <DeskField
+                    action={`settings-model-header-name-${String(index)}`}
+                    value={header.name}
+                    onValueChange={(value) =>
+                      setDraft({
+                        ...draft,
+                        headers: draft.headers.map((row, at) => (at === index ? { ...row, name: value } : row)),
+                      })
+                    }
+                    placeholder={t('settings.model.headersNamePlaceholder')}
+                    className="w-40"
+                  />
+                  <DeskField
+                    action={`settings-model-header-value-${String(index)}`}
+                    type="password"
+                    value={header.value}
+                    onValueChange={(value) =>
+                      setDraft({
+                        ...draft,
+                        headers: draft.headers.map((row, at) => (at === index ? { ...row, value } : row)),
+                      })
+                    }
+                    placeholder={t('settings.model.headersValuePlaceholder')}
+                    className="min-w-0 flex-1"
+                  />
+                  <DeskButton
+                    action={`settings-model-header-remove-${String(index)}`}
+                    variant="ghost"
+                    compact
+                    onClick={() => setDraft({ ...draft, headers: draft.headers.filter((_row, at) => at !== index) })}
+                  >
+                    <Minus size={12} />
+                  </DeskButton>
+                </div>
+              ))}
+              <div>
+                <DeskButton
+                  action="settings-model-header-add"
+                  variant="line"
+                  compact
+                  onClick={() => setDraft({ ...draft, headers: [...draft.headers, { name: '', value: '' }] })}
+                >
+                  <Plus size={12} />
+                  {t('settings.model.headersAdd')}
+                </DeskButton>
+              </div>
+              <p className="text-[10px] text-slate-500">{t('settings.model.headersNote')}</p>
+            </div>
+          ) : null}
+        </div>
+
         <div className="flex flex-wrap gap-2 sm:col-span-2">
           <DeskButton
             action="settings-model-form-save"
@@ -338,7 +549,13 @@ export function ModelProviderPane({
             busy={data.busy === 'save-provider'}
             result={data.resultOf('save-provider')}
             doneLabel={t('desk.done.providerSaved')}
-            {...dead(draft.label.trim() === '' || draft.baseUrl.trim() === '' ? 'FORM_INCOMPLETE' : bridgeDead)}
+            {...dead(
+              draft.label.trim() === '' || draft.baseUrl.trim() === ''
+                ? 'FORM_INCOMPLETE'
+                : !tuningValid
+                  ? 'TUNING_INVALID'
+                  : bridgeDead,
+            )}
             onClick={() => void saveForm()}
           >
             <Save size={14} />

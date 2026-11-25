@@ -11,6 +11,7 @@
 import { maybeService, type Context } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
 import { providerRowOf, providerSecretPath } from './provider-pool.js';
+import { readProviderHeaders, type ProviderHeader, type ProviderTuning } from './provider-tuning.js';
 
 /** 哪条模型通道：chat 是话术与规划，embed 是知识库的向量增强。 */
 export type LegName = 'chat' | 'embed';
@@ -28,6 +29,12 @@ export interface LegConfig {
   model: string | null;
   /** key 的兜底环境变量名。 */
   keyEnv: string;
+  /**
+   * 通道自己那三格（没绑定实例时生效）。`null` = 这一格不发送——
+   * 与实例上同样的三态语义，缺省就是「不发送」，不再有隐藏的 0.7 / 8192。
+   * 省略 = 三格全为「不发送」（向量通道就是这么用的：它没有采样温度这一说）。
+   */
+  tuning?: ProviderTuning;
 }
 
 /**
@@ -37,6 +44,13 @@ export interface LegConfig {
 export interface ResolvedLeg {
   baseUrl: string | null;
   model: string | null;
+  /**
+   * 这一次请求真正要发的那三格（`null` = 不发送）。绑定到实例时以实例为准，
+   * 「不发送」也照搬——否则用户特意清空的那一格会被通道默认值顶回去。
+   */
+  tuning: ProviderTuning;
+  /** 自定义请求头（值只在内存里，来源是密钥库那一格）。 */
+  headers: ProviderHeader[];
   /** 读 key 时问的路径：绑定态是 `llm.provider:<实例 id>`，兜底态是通道自己的服务名。 */
   secretPath: string;
   keyEnv: string;
@@ -54,7 +68,13 @@ export interface ResolvedLeg {
  * @returns 解析结果；不抛——"没绑定且没兜底"是合法形态，由调用方的 `status()` 列进 `missing`
  */
 export function resolveLeg(ctx: Context, leg: LegName, config: LegConfig): ResolvedLeg {
-  const fallback = { secretPath: LEG_SECRET[leg], keyEnv: config.keyEnv, model: config.model };
+  const fallback = {
+    secretPath: LEG_SECRET[leg],
+    keyEnv: config.keyEnv,
+    model: config.model,
+    tuning: config.tuning ?? { temperature: null, maxTokens: null, reasoningEffort: null },
+    headers: [] as ProviderHeader[],
+  };
   if (config.providerId) {
     const db = maybeService<StoreService>(ctx, 'store')?.db;
     const row = db ? providerRowOf(db, config.providerId) : undefined;
@@ -68,6 +88,13 @@ export function resolveLeg(ctx: Context, leg: LegName, config: LegConfig): Resol
         secretPath: providerSecretPath(row.id),
         keyEnv: config.keyEnv,
         model: config.model,
+        // 绑定态**完全听实例的三格**：`null` 也照搬（= 不发送），不让通道默认值把它顶回去。
+        tuning: {
+          temperature: row.temperature,
+          maxTokens: row.max_tokens,
+          reasoningEffort: row.reasoning_effort,
+        },
+        headers: readProviderHeaders(ctx, row.id),
       };
     }
     return { ...fallback, baseUrl: config.baseUrl, providerId: null, origin: config.baseUrl ? 'config' : 'none' };

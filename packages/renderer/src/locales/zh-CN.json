@@ -2380,7 +2380,25 @@
           "BIND_UNCHANGED": "下拉里选的就是现在正在用的那一条，没有要改的东西",
           "NO_SAVED_PROVIDER": "这个实例还没保存：先按「保存」，再拉取模型",
           "LEG_BOUND_KEY": "这一路正由实例供给；实例密钥请到该提供商的「删除实例」里处理，这里的清除只作用于兜底配置"
-        }
+        },
+        "tuningHeading": "采样与思考",
+        "tuningNone": "不发送",
+        "tuningValue": "指定值",
+        "temperatureLabel": "温度（temperature）",
+        "temperaturePlaceholder": "0–2，如 1",
+        "maxTokensLabel": "最大 token（max_tokens）",
+        "maxTokensPlaceholder": "正整数，如 4096",
+        "reasoningLabel": "思考强度（reasoning_effort）",
+        "tuningInvalid": "温度要 0–2、最大 token 要是正整数；填不对就切回「不发送」再存",
+        "headersHeading": "自定义请求头",
+        "headersNone": "没有自定义头",
+        "headersStored": "已存：{{names}}（值不回显）",
+        "headersEdit": "编辑请求头",
+        "headersCancel": "取消编辑",
+        "headersAdd": "加一条",
+        "headersNamePlaceholder": "名字，如 x-api-version",
+        "headersValuePlaceholder": "值（保存后不再显示）",
+        "headersNote": "保存时整体替换；留空的行会被删掉。authorization 由本服务自己写，不能自定义。"
       }
     },
     "journeyMain": {

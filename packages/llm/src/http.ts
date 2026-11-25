@@ -31,7 +31,30 @@ export function joinEndpoint(baseUrl: string, path: string): string {
  * @param body 对端返回的原始文本（实测：无 key 时 DeepSeek 回的是**纯文本**而不是 JSON，两种都要能吃下）
  * @returns 截断到 200 字符的错误描述，进 `LLM_REQUEST_FAILED` 的 message
  */
-export function describeError(status: number, body: string): string {
+/**
+ * 组装这一次请求真正发出去的头：自定义头先铺，内置两条后写。
+ *
+ * 后写的用意是「兜底不可被顶掉」：`content-type` 与 `authorization` 由本服务决定，
+ * 保存时已经拒绝同名的自定义头，这里再兜一次是防将来有别的路径绕过那道校验。
+ * @param request 一次 JSON 请求的实参
+ * @returns 可以直接交给 `fetch` 的头表
+ */
+function withBuiltinHeaders(request: JsonRequest): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const header of request.headers ?? []) headers[header.name] = header.value;
+  headers['content-type'] = 'application/json';
+  headers.authorization = `Bearer ${request.apiKey}`;
+  return headers;
+}
+
+/**
+ * 按错误状态与原文拼一句人话；400 那类再补一条能照着做的提示。
+ * @param status HTTP 状态码
+ * @param body 响应原文
+ * @param requestId 对端 request id（有就带上，排障时要它才能对上厂商日志）
+ * @returns 可直接给用户看的错误文案
+ */
+export function describeError(status: number, body: string, requestId: string | null = null): string {
   const trimmed = body.trim();
   let message = trimmed;
   if (trimmed.startsWith('{')) {
@@ -54,7 +77,32 @@ export function describeError(status: number, body: string): string {
     }
   }
   const clipped = message.length > ERROR_TEXT_LIMIT ? `${message.slice(0, ERROR_TEXT_LIMIT)}…` : message;
-  return `对端返回 ${String(status)}：${clipped}`;
+  const idLine = requestId === null ? '' : `（request id: ${requestId}）`;
+  return `对端返回 ${String(status)}：${clipped}${idLine}${hintOf(status, message)}`;
+}
+
+/**
+ * 从 400 的原文里认出「参数不被接受」这一类，给一句**能照着做**的提示。
+ *
+ * 只认两种最常撞的形状：`temperature` 只接受某值、`reasoning_effort` 不在枚举里。
+ * 认不出就返回空串——不拿通用套话糊弄人（那会让人以为照做就能解决）。
+ * @param status 状态码（只对 400/422 生效：其余状态补这种提示容易误导）
+ * @param message 已经提取出来的错误正文
+ * @returns 追加在错误后面的提示；没有可执行提示时为空串
+ */
+function hintOf(status: number, message: string): string {
+  if (status !== 400 && status !== 422) return '';
+  const lower = message.toLowerCase();
+  if (lower.includes('temperature')) {
+    return '。提示：该模型可能只接受某个固定温度（常见是 1），把这一家的「温度」设成「不发送」再试一次';
+  }
+  if (lower.includes('reasoning_effort') || lower.includes('reasoning effort')) {
+    return '。提示：该模型不认这个思考强度取值，把「思考强度」设成「不发送」或换一档再试';
+  }
+  if (lower.includes('max_tokens') || lower.includes('max tokens')) {
+    return '。提示：该模型不接受这个长度上限，把「最大 token」设成「不发送」再试';
+  }
+  return '';
 }
 
 /**
@@ -106,6 +154,11 @@ export interface JsonRequest {
   readonly label: string;
   /** 动作名，默认 `POST`；`GET` 目前只用于 `/models` 清单探测（spec 7.2-05）。 */
   readonly method?: 'GET' | 'POST';
+  /**
+   * 每实例的自定义请求头（2026-11-25 用户裁定）。**`authorization` 不会从这里来**：
+   * 那一格由本服务用 key 自己写，保存时就拒绝了同名的自定义头（见 `provider-tuning.ts`）。
+   */
+  readonly headers?: readonly { name: string; value: string }[];
 }
 
 /** 一次 JSON POST 的实参。 */
@@ -130,7 +183,7 @@ export async function requestJson(request: JsonRequest): Promise<unknown> {
   try {
     response = await fetch(request.endpoint, {
       method,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${request.apiKey}` },
+      headers: withBuiltinHeaders(request),
       // GET 带 body 在 fetch 里是直接 TypeError，所以只有真有 body 时才挂上（POST 那一路形状不变）。
       ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
       signal: AbortSignal.timeout(request.timeoutMs),
@@ -150,9 +203,15 @@ export async function requestJson(request: JsonRequest): Promise<unknown> {
     );
   }
   if (!response.ok) {
-    throw new AppError('LLM_REQUEST_FAILED', describeError(response.status, await response.text()), request.source, {
+    const text = await response.text();
+    // 对端 request id 是排障时唯一能把「这一次」和厂商侧日志对上的东西，原样带出去。
+    const requestId = response.headers.get('x-request-id') ?? response.headers.get('request-id') ?? null;
+    throw new AppError('LLM_REQUEST_FAILED', describeError(response.status, text, requestId), request.source, {
       endpoint: request.endpoint,
       status: response.status,
+      requestId,
+      // 原文也给一份（截断）：只留拼好的那句时，"哪一段是厂商原话"就分不出来了。
+      body: text.length > ERROR_TEXT_LIMIT ? `${text.slice(0, ERROR_TEXT_LIMIT)}…` : text,
     });
   }
   // 2xx 但回的不是 JSON（网关把错误包成 HTML、或被中间层改写）：这是「拿到了但读不懂」，

@@ -112,6 +112,7 @@ async function boot(options: BootOptions = {}): Promise<Harness> {
     timeoutMs: 8000,
     maxTokens: 400,
     temperature: 0.7,
+    reasoningEffort: null,
   });
   // `llm.settings` 从 7.2-d 起不读自己的配置格（提供商与模型名的表态在池那一行与 `llm` / `llm-embed` 里），
   // 但 `static Config` 是内核 `PluginConstructor` 的必需项，所以直接挂载点要交空实参（`NO_CONFIG` 那条口径）。
@@ -516,10 +517,12 @@ describe('提供商实例池（spec 7.2-02 / 06 / 08 / 10 的存储半边）', (
     await expect(settings.deleteProvider('不存在的 id')).rejects.toMatchObject({ code: 'LLM_PROVIDER_NOT_FOUND' });
   });
 
-  it('迁移落在 31 / 32，回滚到 30 两张表一起消失（spec 7.2-08）', async () => {
+  it('迁移落在 31 / 47 / 32，回滚到 30 两张表一起消失（spec 7.2-08）', async () => {
     const { store, db } = await boot();
-    expect(store.migrations.map((item) => item.version)).toEqual([31, 32]);
-    expect(store.migrationResult.applied).toEqual([31, 32]);
+    // 47 是「采样与思考参数三列」那一支（2026-11-25）：它插在 31 与 32 之间，因为它改的是 31 建的表。
+    expect(store.migrations.map((item) => item.version)).toEqual([31, 47, 32]);
+    // 应用顺序按版本号排，与 push 顺序无关（31 建表 → 32 建清单 → 47 加三列 里 47 在 32 之后才轮到）。
+    expect(store.migrationResult.applied).toEqual([31, 32, 47]);
     const tableNames = (): string[] =>
       (
         db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'llm_%' ORDER BY name").all() as {
@@ -527,10 +530,10 @@ describe('提供商实例池（spec 7.2-02 / 06 / 08 / 10 的存储半边）', (
         }[]
       ).map((item) => item.name);
     expect(tableNames()).toEqual(['llm_models', 'llm_providers']);
-    expect(store.rollback(30).reverted).toEqual([32, 31]);
+    expect(store.rollback(30).reverted).toEqual([47, 32, 31]);
     expect(tableNames()).toEqual([]);
     // 倒回去之后再 `upgrade()` 必须能把两张表建回来（`down` 写歪了的迁移在这里就会露出来）。
-    expect(store.upgrade().applied).toEqual([31, 32]);
+    expect(store.upgrade().applied).toEqual([31, 32, 47]);
     expect(tableNames()).toEqual(['llm_models', 'llm_providers']);
   });
 

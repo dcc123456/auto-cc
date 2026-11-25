@@ -28,6 +28,7 @@ import type {
 } from '@auto-cc/shared';
 import { z } from 'zod';
 import { resolveLeg } from './binding.js';
+import { normalizeHeaders, readProviderHeaders, writeProviderHeaders } from './provider-tuning.js';
 import { endpointOf, normalizeBaseUrl, presetIdOfBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
 import {
   addModelsSchema,
@@ -35,6 +36,7 @@ import {
   saveProviderSchema,
   llmModelMigration,
   llmProviderMigration,
+  llmProviderTuningMigration,
   modelRowsOf,
   providerRowOf,
   providerRowsOf,
@@ -233,6 +235,12 @@ export class LlmSettingsService extends Service {
     const trimmedKey = parsed.data.apiKey?.trim() ?? '';
     if (trimmedKey !== '')
       maybeService<ConfigService>(this.ctx, 'config')?.setSecret(providerSecretPath(row.id), trimmedKey);
+    // 自定义请求头：省略 = 不动已存的那一组；数组 = 整体替换（`[]` = 清空）。
+    // 校验（`authorization` 冲突、同名重复、空名字）放在落库之前已经做过一次 schema 校验之后，
+    // 但语义校验只有这里能做——schema 只认形状，认不出「这一条会不会顶掉本服务写的 key」。
+    if (parsed.data.headers !== undefined && parsed.data.headers !== null) {
+      writeProviderHeaders(this.ctx, row.id, normalizeHeaders(parsed.data.headers));
+    }
     return this.providerView(row);
   };
 
@@ -252,6 +260,8 @@ export class LlmSettingsService extends Service {
       throw new AppError('LLM_PROVIDER_NOT_FOUND', `池里没有这个提供商实例：${id}`, 'llm.settings', { id });
     }
     maybeService<ConfigService>(this.ctx, 'config')?.clearSecret(providerSecretPath(id));
+    // 头是密钥级数据，与 key 同一条清理路径——漏清就是一份孤儿凭证。
+    writeProviderHeaders(this.ctx, id, []);
     const kernel = maybeService<KernelReader>(this.ctx, 'kernel');
     for (const leg of ['chat', 'embed'] as const) {
       const pluginId = LEG_PLUGIN[leg];
@@ -432,6 +442,8 @@ export class LlmSettingsService extends Service {
    */
   private providerView = (row: ProviderRow): LlmProviderInstanceView => {
     const storedKey = maybeService<ConfigService>(this.ctx, 'config')?.getSecret(providerSecretPath(row.id)) ?? '';
+    // 头只报**名字**：值是密钥级数据，过界与进日志都不允许（与 apiKey 同一条纪律）。
+    const headerNames = readProviderHeaders(this.ctx, row.id).map((header) => header.name);
     return {
       id: row.id,
       presetId: row.preset_id,
@@ -441,6 +453,10 @@ export class LlmSettingsService extends Service {
       hasKey: storedKey !== '',
       keyTail: storedKey.slice(-4),
       modelCount: modelRowsOf(this.store.db, row.id).length,
+      temperature: row.temperature,
+      maxTokens: row.max_tokens,
+      reasoningEffort: row.reasoning_effort,
+      headerNames,
     };
   };
 
@@ -508,7 +524,7 @@ export class LlmSettingsService extends Service {
    */
   private ensureSchema(): void {
     const { migrations } = this.store;
-    for (const migration of [llmProviderMigration, llmModelMigration]) {
+    for (const migration of [llmProviderMigration, llmProviderTuningMigration, llmModelMigration]) {
       if (!migrations.some((item) => item.version === migration.version)) migrations.push(migration);
     }
     this.store.upgrade();

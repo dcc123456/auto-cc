@@ -2743,6 +2743,20 @@ export type LlmProviderInstanceView = {
   hasKey: boolean;
   keyTail: string;
   modelCount: number;
+  /**
+   * 采样温度；`null` = **不发送这个字段**（2026-11-25 用户裁定：只接受 `temperature=1` 的严格端点，
+   * 旧实现每次硬塞 0.7，于是 400 直接把人挡在门外）。
+   */
+  temperature: number | null;
+  /** 回复长度上限；`null` = 不发送（不再用 8192 硬顶，也不替人猜）。 */
+  maxTokens: number | null;
+  /** 思考强度；`null` = 不发送（字段名 `reasoning_effort`，取值 low/medium/high）。 */
+  reasoningEffort: LlmReasoningEffort | null;
+  /**
+   * 自定义请求头的**名字**（值永不过界，与 apiKey 同一条加密路径与掩码纪律）。
+   * 界面用它在实例行上说「加了 N 条头」，需要改值时人重新填一遍。
+   */
+  headerNames: string[];
 };
 
 /** 清单里一条已入库模型的读数（角色绑定的候选源，spec 7.2-06 / 11）。 */
@@ -2770,6 +2784,18 @@ export type LlmFetchModelsView = {
 };
 
 /** 添加/修改一个提供商实例的入参（`id` 省略 = 新增）；`apiKey` 省略或空串 = 不动已存的那把。 */
+/**
+ * 思考强度的取值（2026-11-25 用户裁定）：只这三档 + `null`（不发送）。
+ *
+ * 为什么是这三个词而不是自造一套：`reasoning_effort` 是当前主流兼容端点上的既有字段，
+ * 取值沿用 `low / medium / high`；**不发送**用 `null` 表示，绝不默认塞一个值——
+ * 有些端点只认其中若干档，塞错就是 400。
+ */
+export type LlmReasoningEffort = 'low' | 'medium' | 'high';
+
+/** 一条自定义请求头（值按密钥处理：加密落盘、界面打码、日志不落明文）。 */
+export type LlmProviderHeaderInput = { name: string; value: string };
+
 export type LlmProviderSaveInput = {
   id?: string;
   presetId: string;
@@ -2778,6 +2804,20 @@ export type LlmProviderSaveInput = {
   /** 端点前缀；入库前由主进程归一（spec 7.2-03）。 */
   baseUrl: string;
   apiKey?: string | null;
+  /**
+   * 采样温度：数字 = 显式发送；`null` = 这一格**不发送**；省略 = 不改动已存的那一格。
+   * 三态是必要的：省略与「显式清成不发送」在语义上完全不同。
+   */
+  temperature?: number | null;
+  /** 回复长度上限：同上三态。 */
+  maxTokens?: number | null;
+  /** 思考强度：`null` = 不发送；省略 = 不改动。 */
+  reasoningEffort?: LlmReasoningEffort | null;
+  /**
+   * 自定义请求头：数组 = 整体替换（`[]` = 清空）；省略 = 不改动。
+   * 值只在这一次入参里出现，落库走密钥库那一格（与 apiKey 同一条路径）。
+   */
+  headers?: LlmProviderHeaderInput[] | null;
 };
 
 /** 勾选入库的入参：`models` 是界面上勾中的那几条，名字原样进表（不做大小写加工）。 */

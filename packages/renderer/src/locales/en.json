@@ -2380,7 +2380,25 @@
           "BIND_UNCHANGED": "The dropdown already shows the model in use; there is nothing to change",
           "NO_SAVED_PROVIDER": "This instance is not saved yet: press Save first, then fetch models",
           "LEG_BOUND_KEY": "This connection is served by a provider instance; handle that key via Delete instance on the provider, since clearing here only affects the fallback config"
-        }
+        },
+        "tuningHeading": "Sampling & reasoning",
+        "tuningNone": "Don't send",
+        "tuningValue": "Set value",
+        "temperatureLabel": "Temperature",
+        "temperaturePlaceholder": "0–2, e.g. 1",
+        "maxTokensLabel": "Max tokens",
+        "maxTokensPlaceholder": "Positive integer, e.g. 4096",
+        "reasoningLabel": "Reasoning effort",
+        "tuningInvalid": "Temperature must be 0–2 and max tokens a positive integer; switch back to \"Don't send\" if unsure",
+        "headersHeading": "Custom headers",
+        "headersNone": "No custom headers",
+        "headersStored": "Stored: {{names}} (values are never shown)",
+        "headersEdit": "Edit headers",
+        "headersCancel": "Cancel editing",
+        "headersAdd": "Add one",
+        "headersNamePlaceholder": "Name, e.g. x-api-version",
+        "headersValuePlaceholder": "Value (hidden after save)",
+        "headersNote": "Replaces the whole set on save; rows left empty are removed. authorization is written by the app and cannot be overridden."
       }
     },
     "journeyMain": {

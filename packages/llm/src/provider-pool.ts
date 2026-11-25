@@ -26,6 +26,36 @@ export const saveProviderSchema = z.strictObject({
   baseUrl: z.url(),
   /** 明文 key：空/省略 = 不动已存的那把（与 7.1 掩码框同一条语义）。 */
   apiKey: z.string().nullish(),
+  /**
+   * 采样温度：`null` = 不发送；省略 = 不动已存值；数字 0–2 = 显式发送。
+   * 上界 2 是既有口径；下界 0。
+   */
+  temperature: z.number().min(0).max(2).nullish(),
+  /**
+   * 回复长度上限：`null` = 不发送。上界放到 200000 而不是旧版 8192——
+   * 旧值是把「话术只要一两句」的通道缺省当成了所有端点的极限（2026-11-25 用户裁定要能自定义）。
+   */
+  maxTokens: z.number().int().min(1).max(999_999).nullish(),
+  /** 思考强度；`null` = 不发送。 */
+  reasoningEffort: z.enum(['low', 'medium', 'high']).nullish(),
+  /**
+   * 自定义请求头：数组 = 整体替换（`[]` = 清空），省略 = 不动。
+   *
+   * 名字按 HTTP token 校验（拒绝会破坏请求行的字符），值允许任意可见文本；
+   * **`authorization` 不许自定义**——那是本服务写 key 的那一格，两处都能写就是两个真相（§2.5）。
+   */
+  headers: z
+    .array(
+      z.strictObject({
+        name: z
+          .string()
+          .min(1)
+          .max(120)
+          .regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/, '请求头名字只能含 HTTP token 允许的字符'),
+        value: z.string().max(4000),
+      }),
+    )
+    .nullish(),
 });
 
 /**
@@ -54,9 +84,22 @@ export type ProviderRow = {
   label: string;
   base_url: string;
   endpoint_id: string | null;
+  /** 采样温度；`NULL` = 不发送这个字段。 */
+  temperature: number | null;
+  /** 回复长度上限；`NULL` = 不发送。 */
+  max_tokens: number | null;
+  /** 思考强度；`NULL` = 不发送。 */
+  reasoning_effort: 'low' | 'medium' | 'high' | null;
   created_at: number;
   updated_at: number;
 };
+
+/**
+ * 自定义请求头在密钥库里的路径：与 apiKey 同一条加密路径、按实例 id 派生（一个值都不进表）。
+ * @param id `llm_providers.id`
+ * @returns `llm.provider-headers:<id>` 形态的路径
+ */
+export const providerHeadersSecretPath = (id: string): string => `llm.provider-headers:${id}`;
 
 /**
  * 提供商实例的迁移号段：**31**（30 预留给 3.6 的草稿表，当前台账最高 29）。
@@ -82,6 +125,34 @@ export const llmProviderMigration = {
   },
   down: (db: DatabaseSync) => {
     db.exec('DROP TABLE IF EXISTS llm_providers');
+  },
+};
+
+/**
+ * 采样与思考参数三列的迁移号段：**47**（46 已被 `outbound_attempts` 重建用掉）。
+ *
+ * 为什么另起号段而不是改 31 的 `up`：迁移的判据是台账里「这一版记过账没有」，改老版本在新老库上都不会重跑
+ * （AGENTS.md §9 实测 5.3-a）。三列都允许 `NULL`，**`NULL` 的语义是「这个字段不发送」**，
+ * 与「发送默认值」是两件事——严格端点只接受 `temperature=1` 的那一类，塞一个 0.7 就是 400。
+ * 自定义请求头**不在表里**：它与 apiKey 同级，只进密钥库（`llm.provider-headers:<id>`）。
+ */
+export const LLM_PROVIDER_TUNING_MIGRATION_VERSION = 47;
+
+/** 给 `llm_providers` 加 `temperature` / `max_tokens` / `reasoning_effort` 三列。 */
+export const llmProviderTuningMigration = {
+  version: LLM_PROVIDER_TUNING_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec('ALTER TABLE llm_providers ADD COLUMN temperature REAL');
+    db.exec('ALTER TABLE llm_providers ADD COLUMN max_tokens INTEGER');
+    db.exec(
+      "ALTER TABLE llm_providers ADD COLUMN reasoning_effort TEXT CHECK (reasoning_effort IN ('low', 'medium', 'high'))",
+    );
+  },
+  down: (db: DatabaseSync) => {
+    // SQLite 删列要重建表；这三列都是可空、无外键，`DROP COLUMN` 在 3.35+ 可用（本机 sqlite 3.53.4）。
+    db.exec('ALTER TABLE llm_providers DROP COLUMN reasoning_effort');
+    db.exec('ALTER TABLE llm_providers DROP COLUMN max_tokens');
+    db.exec('ALTER TABLE llm_providers DROP COLUMN temperature');
   },
 };
 
@@ -135,16 +206,36 @@ export function saveProviderRow(
 ): ProviderRow | undefined {
   const existing = input.id ? providerRowOf(db, input.id) : undefined;
   if (input.id !== undefined && !existing) return undefined;
+  // 三列都是三态：省略 = 不动已存值；显式 `null` = **清成「不发送」**；数字/枚举 = 显式发送。
+  const temperature = input.temperature === undefined ? (existing?.temperature ?? null) : input.temperature;
+  const maxTokens = input.maxTokens === undefined ? (existing?.max_tokens ?? null) : input.maxTokens;
+  const reasoningEffort =
+    input.reasoningEffort === undefined ? (existing?.reasoning_effort ?? null) : input.reasoningEffort;
   if (existing) {
     db.prepare(
-      'UPDATE llm_providers SET preset_id = ?, label = ?, base_url = ?, endpoint_id = ?, updated_at = ? WHERE id = ?',
-    ).run(input.presetId, input.label, input.baseUrl, endpointId, nowMs, existing.id);
+      `UPDATE llm_providers
+          SET preset_id = ?, label = ?, base_url = ?, endpoint_id = ?, temperature = ?, max_tokens = ?, reasoning_effort = ?, updated_at = ?
+        WHERE id = ?`,
+    ).run(
+      input.presetId,
+      input.label,
+      input.baseUrl,
+      endpointId,
+      temperature,
+      maxTokens,
+      reasoningEffort,
+      nowMs,
+      existing.id,
+    );
     return {
       ...existing,
       preset_id: input.presetId,
       label: input.label,
       base_url: input.baseUrl,
       endpoint_id: endpointId,
+      temperature,
+      max_tokens: maxTokens,
+      reasoning_effort: reasoningEffort,
       updated_at: nowMs,
     };
   }
@@ -155,12 +246,27 @@ export function saveProviderRow(
     label: input.label,
     base_url: input.baseUrl,
     endpoint_id: endpointId,
+    temperature,
+    max_tokens: maxTokens,
+    reasoning_effort: reasoningEffort,
     created_at: nowMs,
     updated_at: nowMs,
   };
   db.prepare(
-    'INSERT INTO llm_providers (id, preset_id, label, base_url, endpoint_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ).run(row.id, row.preset_id, row.label, row.base_url, row.endpoint_id, row.created_at, row.updated_at);
+    `INSERT INTO llm_providers (id, preset_id, label, base_url, endpoint_id, temperature, max_tokens, reasoning_effort, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    row.id,
+    row.preset_id,
+    row.label,
+    row.base_url,
+    row.endpoint_id,
+    row.temperature,
+    row.max_tokens,
+    row.reasoning_effort,
+    row.created_at,
+    row.updated_at,
+  );
   return row;
 }
 

@@ -30,6 +30,7 @@ const CONFIG: LlmConfig = {
   timeoutMs: 8000,
   maxTokens: 400,
   temperature: 0.7,
+  reasoningEffort: null,
 };
 
 afterEach(() => {
@@ -386,6 +387,7 @@ describe('冷启动：建表插件排在后面也不炸', () => {
       timeoutMs: 8000,
       maxTokens: 400,
       temperature: 0.7,
+      reasoningEffort: null,
     });
     const llm = asApp(ctx)['llm.chat'];
     expect(llm.status()).toMatchObject({ available: true, endpoint: ENDPOINT });

@@ -21,6 +21,7 @@ import { readModelIds, resolveLeg, type ResolvedLeg } from './binding.js';
 import { getJson, joinEndpoint, postJson } from './http.js';
 import { readModelKey, type KeyProbe } from './key.js';
 import { providerRowOf, providerSecretPath } from './provider-pool.js';
+import { readProviderHeaders, type ProviderTuning } from './provider-tuning.js';
 
 /** 消息角色：P2 的话术生成只用 system + user，assistant/tool 留给 P5 的对话循环。 */
 export const chatRoleSchema = z.enum(['system', 'user']);
@@ -34,7 +35,7 @@ export const chatMessageSchema = z.strictObject({
 /** 一次补全的入参：消息序列，以及可选的单次覆盖（不传就用配置默认值）。 */
 export const chatRequestSchema = z.strictObject({
   messages: z.array(chatMessageSchema).min(1),
-  maxTokens: z.number().int().min(1).max(8192).nullish(),
+  maxTokens: z.number().int().min(1).max(999_999).nullish(),
   temperature: z.number().min(0).max(2).nullish(),
   /**
    * 单次请求的超时覆盖（毫秒）。
@@ -78,11 +79,46 @@ export const llmSchema = z.strictObject({
    * 代价说清楚：真·不可用时失败要等满这一格才报出来，所以界面那侧的忙态与"退回保守版"是必需项而非可选项。
    */
   timeoutMs: z.number().int().min(1000).max(600000).default(180000),
-  /** 回复长度上限（`max_tokens`），话术只需一两句，默认给到 400。 */
-  maxTokens: z.number().int().min(1).max(8192).default(400),
-  /** 采样温度；话术生成要稳定，默认 0.7。 */
-  temperature: z.number().min(0).max(2).default(0.7),
+  /**
+   * 回复长度上限（`max_tokens`）。**缺省 `null` = 不发送这个字段**（2026-11-25 用户裁定）。
+   *
+   * 为什么不再给 400：那是「话术只要一两句」这条通道的习惯值，被当成所有端点的默认值之后，
+   * 想生成长一点的内容就被截断，而人还以为是模型不行。要限就显式配，配到 999999 也允许。
+   */
+  maxTokens: z.number().int().min(1).max(999_999).nullish().default(null),
+  /**
+   * 采样温度。**缺省 `null` = 不发送**：严格端点只接受 `temperature=1` 的那一类，
+   * 塞一个 0.7 就是 400（本轮用户撞到的根因）。要控制就显式填 0–2。
+   */
+  temperature: z.number().min(0).max(2).nullish().default(null),
+  /**
+   * 思考强度（`reasoning_effort`）。**缺省 `null` = 不发送**；只在显式选了 low/medium/high 时才发。
+   * 取值沿主流兼容端点的既有枚举，不自造多套（写在 plan 的选型证据里）。
+   */
+  reasoningEffort: z.enum(['low', 'medium', 'high']).nullish().default(null),
 });
+
+/**
+ * 把「这一次的三格」摊成请求体里该有的字段：**`null` 就整条不出现**。
+ *
+ * 三态语义在这里落地：单次请求显式给了值（含显式给 `null`）就听它，否则听实例/通道那一份；
+ * 两份都是 `null` 时字段完全不进请求体——严格端点（只认 `temperature=1`）才不会被 0.7 挡回去。
+ * @param request 调用方这一次的覆盖值（可省；`null` 也是显式表态）
+ * @param tuning 实例或通道的生效值
+ * @returns 只含该出现的那几个键的片段
+ */
+export function tuningBody(
+  request: { maxTokens?: number | null; temperature?: number | null },
+  tuning: ProviderTuning,
+): Record<string, number | string> {
+  const body: Record<string, number | string> = {};
+  const maxTokens = request.maxTokens === undefined ? tuning.maxTokens : request.maxTokens;
+  const temperature = request.temperature === undefined ? tuning.temperature : request.temperature;
+  if (maxTokens !== null && maxTokens !== undefined) body.max_tokens = maxTokens;
+  if (temperature !== null && temperature !== undefined) body.temperature = temperature;
+  if (tuning.reasoningEffort !== null) body.reasoning_effort = tuning.reasoningEffort;
+  return body;
+}
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
 export type LlmConfig = z.infer<typeof llmSchema>;
@@ -175,7 +211,16 @@ export class LlmChatService extends Service {
    * @throws 探测态点名池里没有的实例时 `LLM_PROVIDER_NOT_FOUND`
    */
   private resolve = (target?: LlmProbeTarget): ResolvedLeg => {
-    if (!target) return resolveLeg(this.ctx, 'chat', this.options);
+    if (!target)
+      return resolveLeg(this.ctx, 'chat', {
+        ...this.options,
+        // 通道自己那三格：显式配了才发；`null`（缺省）就是「不发送这个字段」。
+        tuning: {
+          temperature: this.options.temperature ?? null,
+          maxTokens: this.options.maxTokens ?? null,
+          reasoningEffort: this.options.reasoningEffort ?? null,
+        },
+      });
     const db = maybeService<StoreService>(this.ctx, 'store')?.db;
     const row = db ? providerRowOf(db, target.providerId) : undefined;
     if (!row) {
@@ -190,6 +235,13 @@ export class LlmChatService extends Service {
       keyEnv: this.options.keyEnv,
       origin: 'pool',
       providerId: row.id,
+      // 探测也要按实例的真实参数发：否则「测试通过、实际用起来 400」或反过来，两种都发生过。
+      tuning: {
+        temperature: row.temperature,
+        maxTokens: row.max_tokens,
+        reasoningEffort: row.reasoning_effort,
+      },
+      headers: readProviderHeaders(this.ctx, row.id),
     };
   };
 
@@ -275,14 +327,14 @@ export class LlmChatService extends Service {
         role: message.role,
         content: redactText(message.content),
       })),
-      max_tokens: parsed.data.maxTokens ?? this.options.maxTokens,
-      temperature: parsed.data.temperature ?? this.options.temperature,
+      ...tuningBody(parsed.data, resolved.tuning),
       stream: false,
     };
     // 传输骨架与 `llm.embed` 共用（§2.2）：这里只负责「请求体长什么样」和「回复怎么读」。
     const payload = (await postJson({
       endpoint: completionsUrl(resolved.baseUrl as string),
       apiKey: this.readKey(resolved).value,
+      headers: resolved.headers,
       body,
       timeoutMs: this.timeoutOf(target, parsed.data.timeoutMs),
       source: 'llm.chat',
