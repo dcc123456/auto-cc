@@ -432,10 +432,16 @@ async function main(): Promise<void> {
   // 判退出**只能看进程事件**：`Browser.close` 的回包在浏览器开始收摊的一瞬间就没了对象，
   // `await` 它会留下一个永不 settle 的 promise（实测：tsx 因此报 `Detected unsettled top-level await`
   // 并以退出码 13 结束，冒烟明明全过却像失败了）。所以这里发完就不等回包，改轮询 exit 事件。
+  const closeStartedAt = Date.now();
   void bridge.send('Browser.close').catch(() => undefined);
-  const exitDeadline = Date.now() + 15_000;
-  while (appExitCode === undefined && Date.now() < exitDeadline) await sleep(200);
+  // 预算 30s（2026-11-25 调整）：实测干净实例 0.2–0.4s 就退，而「跑过工作流与会话」之后偶尔要 2–20s。
+  // **每次都把实际耗时打出来**，让慢退变成可读的读数而不是一个二元的红——否则只会又退化成「复跑就好」。
+  const exitBudgetMs = 30_000;
+  const exitDeadline = Date.now() + exitBudgetMs;
+  while (appExitCode === undefined && Date.now() < exitDeadline) await sleep(100);
+  const exitElapsedMs = Date.now() - closeStartedAt;
   const exited = appExitCode !== undefined;
+  say(`· 退出耗时：${String(exitElapsedMs)}ms（预算 ${String(exitBudgetMs)}ms）`);
   if (!exited) app.kill();
   try {
     bridge.close();
@@ -445,7 +451,9 @@ async function main(): Promise<void> {
   requireStep(
     '冒烟 6/6 干净退出',
     exited,
-    exited ? `Browser.close 后进程自行退出 code=${String(appExitCode)}` : '15s 内没退出，已 kill',
+    exited
+      ? `Browser.close 后进程自行退出 code=${String(appExitCode)} · 耗时 ${String(exitElapsedMs)}ms`
+      : `${String(exitBudgetMs)}ms 内没退出，已 kill（退出耗时 ${String(exitElapsedMs)}ms）`,
   );
 
   const asarHeader = path.join(resourcesDir, 'app.asar');
