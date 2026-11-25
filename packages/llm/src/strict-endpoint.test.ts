@@ -308,6 +308,33 @@ describe('request id 的两种放法与真实对话口吃实例值', () => {
   });
 });
 
+describe('request id 取不到时的写法（QA 的 P3）', () => {
+  it('两边都没有 id 时明确写「对端未给」，不省掉括号', async () => {
+    const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+      request.on('data', () => undefined);
+      request.on('end', () => {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: { message: 'temperature only 1 is allowed' } }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('mock 没起来');
+    try {
+      const { chat } = await bootBound(`http://127.0.0.1:${String(address.port)}/v1`, {
+        temperature: 0.7,
+        headers: [{ name: 'x-custom-token', value: CUSTOM_TOKEN }],
+      });
+      const error = (await chat
+        .complete({ messages: [{ role: 'user', content: '你好' }] })
+        .catch((reason: unknown) => reason)) as Error;
+      expect(error.message).toContain('对端未给 request id');
+    } finally {
+      server.close();
+    }
+  });
+});
+
 describe('保存与测试分离、以及密钥级数据的边界', () => {
   it('端点根本连不通也能保存：保存不探测、只落库', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'auto-cc-llm-saveoffline-'));

@@ -241,7 +241,8 @@ describe('llm.embed 的失败形态（4.3-08：绝不产生伪向量）', () => 
       const { embed } = await boot();
       await expect(embed.embed(['甲'])).rejects.toMatchObject({
         code: 'LLM_REQUEST_FAILED',
-        message: '对端返回 401：Token is invalid.',
+        // 401 也没带 request id：按 2026-11-25 的 P3，文案里必须如实写「对端未给」。
+        message: '对端返回 401：Token is invalid.（对端未给 request id）',
         details: { endpoint: ENDPOINT, status: 401 },
       });
       expect(fixture.requests).toHaveLength(1);

@@ -73,6 +73,7 @@ const LLM_BASE: LlmConfig = {
   timeoutMs: 8000,
   maxTokens: 400,
   temperature: 0.7,
+  reasoningEffort: null,
 };
 
 const SCRIPT_BASE: OutboundScriptConfig = {

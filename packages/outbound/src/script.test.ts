@@ -39,6 +39,7 @@ const LLM_BASE: LlmConfig = {
   timeoutMs: 8000,
   maxTokens: 400,
   temperature: 0.7,
+  reasoningEffort: null,
 };
 
 /** 话术侧的默认配置：与 schema 的 default 一致（带 `.default()` 的键在直接调用点必须显式给出，AGENTS.md §9）。 */

@@ -99,7 +99,9 @@ export function describeError(status: number, body: string, requestId: string | 
     }
   }
   const clipped = message.length > ERROR_TEXT_LIMIT ? `${message.slice(0, ERROR_TEXT_LIMIT)}…` : message;
-  const idLine = requestId === null ? '' : `（request id: ${requestId}）`;
+  // 取不到就**如实写「对端未给」**，而不是省掉括号：省掉之后，人分不清「这家不提供 id」
+  // 与「这个版本还没取 id」——判据要的是可判定，不是好看（2026-11-25 QA 的 P3）。
+  const idLine = requestId === null ? '（对端未给 request id）' : `（request id: ${requestId}）`;
   return `对端返回 ${String(status)}：${clipped}${idLine}${hintOf(status, message)}`;
 }
 
