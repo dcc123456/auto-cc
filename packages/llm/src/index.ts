@@ -327,7 +327,13 @@ export class LlmChatService extends Service {
         role: message.role,
         content: redactText(message.content),
       })),
-      ...tuningBody(parsed.data, resolved.tuning),
+      // 绑定到实例时**实例说了算**（含它的 null = 不发送）：调用点传的 maxTokens/temperature 只是
+      // 「没绑定时的兜底」。否则严格端点上，某个调用点硬写的 `temperature: 0` 会把用户特意选的
+      // 「不发送」顶回去——那正是这一轮 400 的同一个病，只是换了个位置。
+      //
+      // **例外是探测口**（`target` 有值）：连通性测试故意只发 8 个 token，不该按用户配的 999999
+      // 去烧钱，所以那一趟允许调用点的小覆盖（2026-11-25 管理员裁定）。
+      ...tuningBody(resolved.origin === 'pool' && target === undefined ? {} : parsed.data, resolved.tuning),
       stream: false,
     };
     // 传输骨架与 `llm.embed` 共用（§2.2）：这里只负责「请求体长什么样」和「回复怎么读」。

@@ -48,6 +48,28 @@ function withBuiltinHeaders(request: JsonRequest): Record<string, string> {
 }
 
 /**
+ * 从错误正文的 JSON 里取 request id（`request_id` / `requestId` / `error.request_id` 都认）。
+ * @param text 响应原文
+ * @returns 找到的 id；不是 JSON 或没有这一格时 null
+ */
+function requestIdOfBody(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      request_id?: unknown;
+      requestId?: unknown;
+      error?: { request_id?: unknown; requestId?: unknown };
+    };
+    const candidates = [parsed.request_id, parsed.requestId, parsed.error?.request_id, parsed.error?.requestId];
+    for (const candidate of candidates) if (typeof candidate === 'string' && candidate !== '') return candidate;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 按错误状态与原文拼一句人话；400 那类再补一条能照着做的提示。
  * @param status HTTP 状态码
  * @param body 响应原文
@@ -205,7 +227,14 @@ export async function requestJson(request: JsonRequest): Promise<unknown> {
   if (!response.ok) {
     const text = await response.text();
     // 对端 request id 是排障时唯一能把「这一次」和厂商侧日志对上的东西，原样带出去。
-    const requestId = response.headers.get('x-request-id') ?? response.headers.get('request-id') ?? null;
+    // request id 有两种放法：响应头（OpenAI 系常见）与 JSON 正文（不少网关这么给，QA 的 mock 就是）。
+    // 两处都认——只认头的话，正文里带着 id 的对端在界面上就永远「没有 id 可对」。
+    const headerId =
+      response.headers.get('x-request-id') ??
+      response.headers.get('request-id') ??
+      response.headers.get('x-amzn-requestid') ??
+      null;
+    const requestId = headerId ?? requestIdOfBody(text);
     throw new AppError('LLM_REQUEST_FAILED', describeError(response.status, text, requestId), request.source, {
       endpoint: request.endpoint,
       status: response.status,

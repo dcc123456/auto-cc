@@ -1792,3 +1792,14 @@ interface JourneyContext {
 覆盖六种参数组合 + 保存不探测 + `authorization` 不许自定义 + 只回名字不回值；
 `pnpm test` 全绿（2881 例）。界面侧新增四格（温度/最大 token/思考强度/自定义头），
 `authorization` 冲突与非法取值都在保存键上给出可见原因。
+
+**2026-11-25 dated 补记（管理员裁定后的两处收口）**
+
+1. **`request_id` 两头都读**：先看响应头（`x-request-id` / `request-id` / `x-amzn-requestid`），没有就从
+   JSON 正文里认（`request_id` / `requestId` / `error.request_id`）。取到哪个显示哪个，都取不到记「对端未给」。
+   QA 的 mock 正是「id 在 body 里」这一种，只认头的话那一格永远不成立。
+2. **探测口与对话口分开判**：探测（`check`）故意只发 `max_tokens: 8`——不该按用户配的上限去烧钱，
+   所以那一趟允许调用点的小覆盖；**真实对话口**（助手、简历生成走的 `llm.chat.complete`，不带探测目标）
+   由实例值说了算（`max_tokens` / `reasoning_effort` 按实例，`temperature` 为「不发送」时依旧缺席）。
+   可复跑命令：应用实例里让助手说一句话（`window.autoCC.chat['session.send']('你好')`），
+   读对端收到的请求体：`max_tokens` 应等于实例设置值、`temperature` 缺席、`reasoning_effort` 按配置出现。

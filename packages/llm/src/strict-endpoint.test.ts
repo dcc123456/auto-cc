@@ -258,6 +258,56 @@ describe('严格端点：参数只在**显式配置**时出现在请求体里', 
   });
 });
 
+describe('request id 的两种放法与真实对话口吃实例值', () => {
+  it('对端把 request_id 放在**响应体**里也能透出（不只认响应头）', async () => {
+    // 一个只在 body 里带 id 的端点：不少网关就是这么给的（QA 的 mock 亦然）。
+    const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+      request.on('data', () => undefined);
+      request.on('end', () => {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({ request_id: 'mock-body-400', error: { message: 'temperature only 1 is allowed' } }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('mock 没起来');
+    try {
+      const { chat } = await bootBound(`http://127.0.0.1:${String(address.port)}/v1`, {
+        temperature: 0.7,
+        headers: [{ name: 'x-custom-token', value: CUSTOM_TOKEN }],
+      });
+      const error = (await chat
+        .complete({ messages: [{ role: 'user', content: '你好' }] })
+        .catch((reason: unknown) => reason)) as Error & { details?: { requestId?: string | null } };
+      expect(error.details?.requestId).toBe('mock-body-400');
+      expect(error.message).toContain('mock-body-400');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('真实对话口（无探测覆盖）按实例发 max_tokens / 思考强度，温度照旧缺席', async () => {
+    const endpoint = await startStrictEndpoint();
+    try {
+      // 这条就是助手/简历生成走的那条 `llm.chat.complete`：没有探测目标，实例值说了算。
+      const { chat } = await bootBound(endpoint.baseUrl, {
+        maxTokens: 1234,
+        reasoningEffort: 'high',
+        headers: [{ name: 'x-custom-token', value: CUSTOM_TOKEN }],
+      });
+      await chat.complete({ messages: [{ role: 'user', content: '随便聊一句' }] });
+      const body = endpoint.seen[0]?.body ?? {};
+      expect(body.max_tokens).toBe(1234);
+      expect(body).not.toHaveProperty('temperature');
+      expect(body.reasoning_effort).toBe('high');
+    } finally {
+      endpoint.server.close();
+    }
+  });
+});
+
 describe('保存与测试分离、以及密钥级数据的边界', () => {
   it('端点根本连不通也能保存：保存不探测、只落库', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'auto-cc-llm-saveoffline-'));
