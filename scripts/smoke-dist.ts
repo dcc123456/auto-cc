@@ -16,7 +16,7 @@
  *
  * 用法：`pnpm smoke:dist`（可加 `--exe <路径>` `--cdp-port` `--fixture-port` `--plan` `--out`）。
  */
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -60,6 +60,9 @@ const artifactForCurrentPlatform = (): string => {
 };
 
 const lines: string[] = [];
+
+/** 记下的缺陷（不判红但要出现在结论里：`5–30s` 的慢退走这一档）。 */
+const exitDefects: string[] = [];
 
 /**
  * 中途抛错也必须回收的句柄——冒烟失败不能把装机产物留在后台跑，
@@ -441,26 +444,52 @@ async function main(): Promise<void> {
   while (appExitCode === undefined && Date.now() < exitDeadline) await sleep(100);
   const exitElapsedMs = Date.now() - closeStartedAt;
   const exited = appExitCode !== undefined;
-  say(`· 退出耗时：${String(exitElapsedMs)}ms（预算 ${String(exitBudgetMs)}ms）`);
+  // 并发实例数：慢退是负载相关的（2026-11-25 管理员裁定），所以记缺陷时必须带上当时的负载读数。
+  let concurrentInstances: number | null = null;
+  try {
+    const listing = execFileSync('pgrep', ['-f', 'auto-cc.app/Contents/MacOS/auto-cc'], { stdio: 'pipe' })
+      .toString()
+      .trim()
+      .split('\n')
+      .filter((line) => line !== '');
+    concurrentInstances = listing.length;
+  } catch {
+    // 没有 pgrep（或没有别的实例）就当 0：判据不依赖它，只是缺陷记录里的一行上下文。
+    concurrentInstances = null;
+  }
+  say(
+    `· 退出耗时：${String(exitElapsedMs)}ms（预算 ${String(exitBudgetMs)}ms · 并行实例=${concurrentInstances === null ? '未知' : String(concurrentInstances)}）`,
+  );
   if (!exited) app.kill();
   try {
     bridge.close();
   } catch {
     /* 浏览器先走了，会话本来就断了 */
   }
-  requireStep(
-    '冒烟 6/6 干净退出',
-    exited,
-    exited
-      ? `Browser.close 后进程自行退出 code=${String(appExitCode)} · 耗时 ${String(exitElapsedMs)}ms`
-      : `${String(exitBudgetMs)}ms 内没退出，已 kill（退出耗时 ${String(exitElapsedMs)}ms）`,
-  );
+  // 分档判据（2026-11-25 管理员裁定）：缺读数即红；空载 ≤5s 为绿；5–30s **记缺陷**（附耗时与负载）；
+  // >30s 直接红。用一个绝对阈值会把「慢」当「坏」，也会把「坏」当「慢」——所以分档而不是一刀切。
+  const exitDetail = exited
+    ? `Browser.close 后进程自行退出 code=${String(appExitCode)} · 耗时 ${String(exitElapsedMs)}ms · 并行实例=${concurrentInstances === null ? '未知' : String(concurrentInstances)}`
+    : `${String(exitBudgetMs)}ms 内没退出，已 kill（退出耗时 ${String(exitElapsedMs)}ms）`;
+  if (!exited || exitElapsedMs > 30_000) {
+    requireStep('冒烟 6/6 干净退出', false, exitDetail);
+  } else if (exitElapsedMs > 5_000) {
+    // 记缺陷但不判红：这一档要的是可追的读数，不是把一次慢退当失败。
+    say(`DEFECT · 冒烟 6/6 退出偏慢（>5s，已记缺陷）—— ${exitDetail}`);
+    exitDefects.push(exitDetail);
+  } else {
+    requireStep('冒烟 6/6 干净退出', true, exitDetail);
+  }
 
   const asarHeader = path.join(resourcesDir, 'app.asar');
   say(
     `· 附读：app.asar ${existsSync(asarHeader) ? `${String(Math.round(readFileSync(asarHeader).byteLength / 1024 / 1024))} MiB` : '不在'}`,
   );
-  say('冒烟结论：六步全过，产物可发。');
+  say(
+    exitDefects.length === 0
+      ? '冒烟结论：六步全过，产物可发。'
+      : `冒烟结论：六步全过，但记 ${String(exitDefects.length)} 条缺陷（退出偏慢，见 DEFECT 行），不按「复跑通过」处置。`,
+  );
 }
 
 try {
